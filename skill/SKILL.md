@@ -1,12 +1,12 @@
 ---
 name: packet-tracer
-description: Use when the user gives a Cisco Packet Tracer file (.pka activity or .pkt) and wants it configured, completed, inspected or its instructions read — e.g. "sprav tento lab", "urob aktivitu", "nakonfiguruj routre v tomto .pka", "čo je zadanie v tomto pka", "do this Packet Tracer activity". Configures routers, switches, PCs and servers by editing the file directly with the pkt2shell tool, without the Packet Tracer GUI.
+description: Use when the user gives a Cisco Packet Tracer file (.pka activity or .pkt) and wants it configured, completed, inspected or its instructions read — e.g. "sprav tento lab", "urob aktivitu", "nakonfiguruj routre v tomto .pka", "čo je zadanie v tomto pka", "do this Packet Tracer activity", "solve this .pka". Configures routers, switches, PCs and servers by editing the file directly with the pkt2shell tool, without the Packet Tracer GUI.
 ---
 
 # Packet Tracer labs via pkt2shell
 
 Tool repo (local clone): `{{REPO}}`
-Read `{{REPO}}/CLAUDE.md` before the first edit in a session — it holds the verified facts about the file format.
+Read `{{REPO}}/AGENTS.md` before the first edit in a session — it holds the verified facts about the file format.
 
 Below, `$PKT` stands for this exact command — write it out in full in every shell call
 (variables are not word-split in zsh and shell state does not persist between calls):
@@ -19,7 +19,7 @@ Quote file paths (lab names contain spaces). Each command takes ~2–5 s (pure-P
 
 ## Rules
 
-- Never overwrite the user's file. Write the result next to it as `<original name> - VYPRACOVANE.pka`.
+- Never overwrite the user's file. Write the result next to it as `<original name> - completed.pka`.
 - Keep work files (instructions, configs) in `{{REPO}}/labs/<short-lab-name>/` (git-ignored).
   Never commit `.pka`/`.xml`/instructions or lab solutions to the repo.
 - Never look at, show or edit the answer network (the tool refuses it) and never touch COMPARISONS,
@@ -55,7 +55,7 @@ Quote file paths (lab names contain spaces). Each command takes ~2–5 s (pure-P
    `show ip ssh` on the router (if SSH is not enabled, they run `crypto key generate rsa` once in the
    CLI). Ask them to paste failing Check Results items, then fix and re-apply.
 
-## Known limits (see CLAUDE.md)
+## Known limits (see AGENTS.md)
 
 - Verified: IOS running-config replay on open; PC/server addressing via set-host.
 - Unverified: RSA keys and VLAN databases (exec-time / `ENGINE/VLANS` state), server services

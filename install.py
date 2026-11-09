@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
-"""Install the pkt2shell Claude Code skill for this computer.
+"""Install the pkt2shell agent skill on this computer.
 
-Usage:  python3 install.py        (Windows: py install.py)
+Usage:
+    python3 install.py              install for Claude Code and Codex
+    python3 install.py --claude     Claude Code only  (~/.claude/skills/packet-tracer/)
+    python3 install.py --codex      Codex only        (~/.agents/skills/packet-tracer/)
+    python3 install.py --uninstall  remove the skill from both locations
 
-Writes ~/.claude/skills/packet-tracer/SKILL.md with the paths of this repo filled in,
-then runs a quick self-test of the Packet Tracer file codec. Re-run after `git pull`.
+On Windows use `py install.py`. Re-run after `git pull` or after moving this folder.
 """
+import argparse
 import importlib.util
 import os
 import shutil
@@ -13,6 +17,11 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent
+SKILL = "packet-tracer"
+TARGETS = {
+    "Claude Code": Path.home() / ".claude" / "skills" / SKILL,
+    "Codex": Path.home() / ".agents" / "skills" / SKILL,
+}
 
 
 def python_cmd():
@@ -21,32 +30,54 @@ def python_cmd():
     return "python3"
 
 
-def main():
-    if sys.version_info < (3, 8):
-        sys.exit("Python 3.8 or newer is required.")
-
-    # self-test: Twofish known-answer test (all-zero 128-bit key and block)
+def self_test():
     spec = importlib.util.spec_from_file_location("ptcrypto", REPO / "tools" / "ptcrypto.py")
     ptcrypto = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(ptcrypto)
-    ct = ptcrypto.Twofish(bytes(16)).encrypt_block(bytes(16)).hex().upper()
-    if ct != "9F589F5CF6122C32B6BFEC2F2AE8C35A":
-        sys.exit("self-test failed: Twofish implementation returned a wrong result")
+    # Twofish known-answer test: all-zero 128-bit key and block
+    if ptcrypto.Twofish(bytes(16)).encrypt_block(bytes(16)).hex().upper() != "9F589F5CF6122C32B6BFEC2F2AE8C35A":
+        sys.exit("Self-test failed: the Twofish implementation returned an incorrect result.")
 
+
+def main():
+    ap = argparse.ArgumentParser(description="Install the pkt2shell skill for Claude Code and/or Codex.")
+    ap.add_argument("--claude", action="store_true", help="install for Claude Code only")
+    ap.add_argument("--codex", action="store_true", help="install for Codex only")
+    ap.add_argument("--uninstall", action="store_true", help="remove the installed skill")
+    a = ap.parse_args()
+
+    if sys.version_info < (3, 8):
+        sys.exit("Python 3.8 or newer is required.")
+
+    chosen = [name for name, flag in (("Claude Code", a.claude), ("Codex", a.codex)) if flag] or list(TARGETS)
+
+    if a.uninstall:
+        for name in chosen:
+            f = TARGETS[name] / "SKILL.md"
+            if f.exists():
+                f.unlink()
+                try:
+                    TARGETS[name].rmdir()
+                except OSError:
+                    pass
+                print(f"Removed  {name}: {f}")
+        return
+
+    self_test()
     repo = REPO.as_posix()
     pkt = f'{python_cmd()} -I "{repo}/tools/pkt.py"'
     text = (REPO / "skill" / "SKILL.md").read_text(encoding="utf-8")
     text = text.replace("{{REPO}}", repo).replace("{{PKT}}", pkt)
 
-    dest = Path.home() / ".claude" / "skills" / "packet-tracer"
-    dest.mkdir(parents=True, exist_ok=True)
-    (dest / "SKILL.md").write_text(text, encoding="utf-8")
+    for name in chosen:
+        TARGETS[name].mkdir(parents=True, exist_ok=True)
+        (TARGETS[name] / "SKILL.md").write_text(text, encoding="utf-8")
+        print(f"Installed  {name}: {TARGETS[name] / 'SKILL.md'}")
     (REPO / "labs").mkdir(exist_ok=True)
 
-    print(f"OK  skill installed: {dest / 'SKILL.md'}")
-    print(f"    tool command:    {pkt}")
-    print("Open a new Claude Code session anywhere and say e.g.:")
-    print('    sprav aktivitu "C:/Users/me/Downloads/lab.pka"')
+    print(f"Tool command: {pkt}")
+    print("Start a new agent session in any folder and ask, for example:")
+    print('    Complete the Packet Tracer activity "C:/Users/me/Downloads/lab.pka"')
 
 
 if __name__ == "__main__":

@@ -1,29 +1,36 @@
 # pkt2shell
 
-Nástroj, s ktorým **Claude Code** vypracuje aktivitu z Cisco Packet Tracera (`.pka`) priamo v súbore.
-Pošleš mu `.pka`, on si prečíta zadanie, nakonfiguruje routre, switche a PC a vráti ti hotový súbor,
-ktorý otvoríš v Packet Traceri.
+pkt2shell lets a coding agent, such as **Claude Code** or **OpenAI Codex**, read and configure
+Cisco Packet Tracer activity files (`.pka`) and network files (`.pkt`) directly, without
+operating the Packet Tracer user interface. Given an activity file, the agent reads the
+instructions and topology, configures the routers, switches and end devices, and produces a new
+file that can be opened and checked in Packet Tracer.
 
-Funguje na **Windows, macOS aj Linuxe**. Okrem Pythonu netreba nič inštalovať ani kompilovať.
-Otestované s Packet Tracer 9.0.1.
+The project consists of:
+
+- a dependency-free Python command-line tool (`tools/pkt.py`) that decrypts, inspects and edits
+  Packet Tracer files;
+- an agent skill (`skill/SKILL.md`) that defines a safe, repeatable workflow for completing an
+  activity;
+- an installer (`install.py`) that registers the skill with Claude Code and Codex.
+
+Supported platforms are Windows, macOS and Linux. The tool has been validated with
+Cisco Packet Tracer 9.0.1.
 
 ---
 
-## Návod
+## Requirements
 
-### 1. Čo potrebuješ
+| Component | Notes |
+|---|---|
+| Python 3.8 or newer | Windows: install from [python.org](https://www.python.org/downloads/) and enable *Add python.exe to PATH*. |
+| Claude Code and/or Codex | Either the desktop application or the command-line interface. |
+| Cisco Packet Tracer | Required only to open and verify the resulting file. |
+| Git | Optional. The repository can also be downloaded as a ZIP archive. |
 
-- **Claude Code**, buď ako desktopová aplikácia Claude (záložka Code), alebo ako príkaz `claude` v termináli
-- **Python 3.8 alebo novší**
-  - Windows: nainštaluj z [python.org](https://www.python.org/downloads/) a zaškrtni „Add python.exe to PATH“
-  - macOS: Python je väčšinou už nainštalovaný, otestuješ to príkazom `python3 --version`
-- **Packet Tracer**, aby si si mohol výsledok otvoriť a skontrolovať percentá
-- **git**, alebo si repozitár stiahni ako ZIP (zelené tlačidlo *Code* → *Download ZIP*)
+No compiler or third-party Python packages are required.
 
-> Repozitár je súkromný. Aby si ho mohol stiahnuť, musí ťa vlastník pridať
-> (Settings → Collaborators).
-
-### 2. Inštalácia (iba raz)
+## Installation
 
 ```bash
 git clone https://github.com/potatko/pkt2shell.git
@@ -31,53 +38,53 @@ cd pkt2shell
 python3 install.py
 ```
 
-Na Windowse namiesto `python3` použi `py`:
+On Windows, use `py install.py`.
 
-```bash
-py install.py
-```
+By default, the installer registers the skill for both agents:
 
-Ak všetko prebehlo v poriadku, uvidíš `OK  skill installed: ...`.
-Inštalátor pridá do Claude Code **skill** `packet-tracer`, čo je návod, podľa ktorého Claude vie,
-ako s `.pka` súbormi pracovať. Priečinok `pkt2shell` potom nepresúvaj. Ak ho presunieš,
-spusti `install.py` znova.
+| Agent | Skill location |
+|---|---|
+| Claude Code | `~/.claude/skills/packet-tracer/SKILL.md` |
+| Codex | `~/.agents/skills/packet-tracer/SKILL.md` |
 
-### 3. Vypracovanie aktivity
+Use `--claude` or `--codex` to install for a single agent, and `--uninstall` to remove the skill.
+The skill references the repository by its absolute path. If the repository is moved, run the
+installer again.
 
-1. Stiahni si aktivitu `.pka`, napríklad do priečinka Downloads.
-2. Otvor **novú** session v Claude Code. Môže byť v ľubovoľnom priečinku.
-3. Napíš napríklad:
+## Usage
 
-   > sprav aktivitu "C:\Users\ja\Downloads\11.5.5 Packet Tracer - Subnet an IPv4 Network.pka"
+1. Start a new Claude Code or Codex session. The working directory does not matter.
+2. Ask the agent to complete the activity and give it the file path, for example:
 
-   Na Macu: `sprav aktivitu ~/Downloads/lab.pka`. Súbor môžeš do okna aj pretiahnuť.
-4. Claude si prečíta zadanie a topológiu, ukáže ti plán (adresy, čo nastaví na ktorom zariadení)
-   a vytvorí nový súbor vedľa pôvodného:
+   > Complete the Packet Tracer activity "C:\Users\student\Downloads\11.5.5 Subnet an IPv4 Network.pka"
 
-   `… - VYPRACOVANE.pka`
+3. The agent extracts the instructions and topology, presents an addressing and configuration plan,
+   and writes the result next to the original file as:
 
-   Pôvodný súbor zostane nezmenený.
-5. Otvor `VYPRACOVANE.pka` v Packet Traceri (File → Open) a pozri si percento
-   (*Check Results*).
-6. Ak to nie je 100 %, skopíruj Claudovi nesplnené položky z *Check Results*. Opraví ich
-   a vytvorí nový súbor.
+   `<original name> - completed.pka`
 
-### 4. Čo si skontrolovať
+   The original file is never modified.
+4. Open the new file in Packet Tracer (*File → Open*) and review the completion percentage and
+   *Check Results*.
+5. If the activity is not complete, paste the failing *Check Results* items into the session.
+   The agent corrects the configuration and writes a new file.
 
-- **SSH na routroch:** RSA kľúč sa pri otvorení súboru nemusí vytvoriť. Na routri zadaj
-  `show ip ssh`. Ak SSH nie je zapnuté, zadaj raz v CLI:
+### Post-completion checks
+
+- **SSH:** RSA key generation is an exec-time operation and may not be applied when the file is
+  opened. Run `show ip ssh` on the router. If SSH is not enabled, enter the following once in the CLI:
   ```
   enable
-  conf t
+  configure terminal
   crypto key generate rsa general-keys modulus 1024
   ```
-- **Vlastné adresovanie:** keď si zadanie nechá adresy na teba, Claude použije bežný spôsob
-  (router = prvá použiteľná adresa, switch = druhá, PC = posledná). Ak by hodnotenie čakalo iné adresy,
-  uvidíš to v *Check Results*.
-- **VLANy, DHCP/DNS servery, wireless** zatiaľ nie sú overené. Claude ti v takom prípade dá aj príkazy
-  na zadanie v CLI.
+- **Addressing schemes left to the student:** the agent uses a conventional assignment (router:
+  first usable address; switch SVI: second; host: last). If the activity expects different values,
+  the affected items appear in *Check Results*.
+- **Not yet validated:** VLAN databases, server services (DNS, HTTP, DHCP), and wireless settings.
+  For activities that require them, the agent also provides the equivalent CLI commands.
 
-### 5. Aktualizácia
+### Updating
 
 ```bash
 cd pkt2shell
@@ -87,53 +94,67 @@ python3 install.py
 
 ---
 
-## Pravidlá
+## Command-line reference
 
-- Nástroj **nikdy nepozerá ani nemení vzorové riešenie** (answer network) ani hodnotenie aktivity.
-  Claude rieši lab iba podľa zadania.
-- Dodržiavaj pravidlá svojho predmetu. Ak nemáš dovolené pri aktivitách používať AI, nepoužívaj ho.
-- Do repozitára sa necommitujú `.pka` súbory, zadania ani vypracované laby (sú v `.gitignore`).
+The agent invokes `tools/pkt.py`. It can also be used directly:
 
----
+| Command | Description |
+|---|---|
+| `list FILE` | Networks and devices; marks the network Packet Tracer loads on open. |
+| `instructions FILE [--html]` | Activity instructions as Markdown (or raw HTML). |
+| `links FILE [--net N]` | Cabling between devices (topology). |
+| `show FILE DEVICE [--net N] [--startup]` | IOS running- or startup-configuration as text. |
+| `ports FILE DEVICE [--net N]` | Interfaces with MAC and IP addresses. |
+| `set-config FILE DEVICE CFG -o OUT [--startup] [--nets 0,1]` | Replaces the IOS configuration with the contents of `CFG`. |
+| `set-host FILE DEVICE -o OUT [--ip --mask --gw --dns --ipv6 --ipv6-ll --ipv6-gw --ipv6-dns --port]` | Static addressing for PCs and servers. |
+| `decrypt FILE.pka OUT.xml` / `encrypt FILE.xml OUT.pka` | Whole-file conversion. |
 
-## Pre pokročilých: príkazy nástroja
-
-Claude volá nástroj `tools/pkt.py`. Môžeš ho používať aj sám:
+Example:
 
 ```bash
-python3 tools/pkt.py list lab.pka                  # siete a zariadenia
-python3 tools/pkt.py instructions lab.pka          # zadanie ako Markdown
-python3 tools/pkt.py links lab.pka                 # topológia (kto je kam zapojený)
-python3 tools/pkt.py show lab.pka R1 > r1.txt      # IOS konfigurácia ako text
-python3 tools/pkt.py ports lab.pka PC1             # porty, MAC, IP
-# uprav r1.txt (celá konfigurácia, nahradí pôvodnú; banner oddeľuj ^C)
-python3 tools/pkt.py set-config lab.pka R1 r1.txt --startup -o hotovo.pka
-python3 tools/pkt.py set-host hotovo.pka PC1 --ip 192.168.0.10 --mask 255.255.255.0 \
-    --gw 192.168.0.1 --ipv6 2001:db8::10/64 --ipv6-ll fe80::2 --ipv6-gw fe80::1 -o hotovo.pka
-python3 tools/pkt.py decrypt lab.pka lab.xml       # celý súbor ako XML
-python3 tools/pkt.py encrypt lab.xml lab.pka
+python3 tools/pkt.py show lab.pka R1 > r1.txt
+# edit r1.txt: provide the complete configuration; use ^C as the banner delimiter
+python3 tools/pkt.py set-config lab.pka R1 r1.txt --startup -o result.pka
+python3 tools/pkt.py set-host result.pka PC1 --ip 192.168.0.10 --mask 255.255.255.0 \
+    --gw 192.168.0.1 --ipv6 2001:db8::10/64 --ipv6-ll fe80::2 --ipv6-gw fe80::1 -o result.pka
 ```
 
-### Ako to funguje
+## Technical overview
 
-- `.pka`/`.pkt` je XML, ktoré je skomprimované (zlib), zašifrované (Twofish/EAX) a jednoducho
-  zamaskované. `tools/ptcrypto.py` to robí v čistom Pythone. Výsledok je bajt po bajte rovnaký
-  ako z pôvodného nástroja pka2xml.
-- Aktivita obsahuje tri siete: `#0` uložený postup, `#1` počiatočný stav a `#2` vzorové riešenie.
-  Čerstvá aktivita sa otvára zo siete `#1`, uložená zo siete `#0`. Nástroj zapisuje do oboch.
-- Routre a switche: text v `RUNNINGCONFIG` Packet Tracer pri otvorení súboru vykoná ako príkazy,
-  takže konfigurácia platí hneď. `STARTUPCONFIG` sa použije pri `reload`.
-- PC a servery majú adresy v samostatných poliach portu (`IP`, `SUBNET`, `PORT_GATEWAY`, `IPV6_*`).
-- Úpravy sa robia priamo v bajtoch, nie cez XML knižnicu, pretože XML obsahuje riadiace znaky
-  (napríklad `0x03` v banneroch). Zvyšok súboru tak zostane bajt po bajte rovnaký. Každý výstup
-  sa pred zápisom overí opätovným dešifrovaním.
+- **File format.** A Packet Tracer file is XML that is zlib-compressed, encrypted with Twofish in
+  EAX mode, and obfuscated with position-dependent XOR passes. `tools/ptcrypto.py` implements this
+  in pure Python. Its output is byte-identical to that of the reference implementation (pka2xml).
+- **Activity structure.** An activity contains three networks: `#0` (saved progress), `#1`
+  (initial state) and `#2` (answer network). A new activity is opened from `#1`, and a saved one from
+  `#0`. Edits are applied to both.
+- **Network devices.** The `RUNNINGCONFIG` element holds plain IOS commands that Packet Tracer
+  replays when the file is opened, so configuration takes effect immediately. `STARTUPCONFIG` is
+  applied on `reload`.
+- **End devices.** PC and server addressing is stored in structured interface fields (`IP`,
+  `SUBNET`, `PORT_GATEWAY`, `IPV6_*`) and device fields (`GATEWAY`, `DNS_CLIENT`).
+- **Edit safety.** The XML contains raw control characters (for example `0x03` banner
+  delimiters), so edits are applied as byte-level replacements of individual elements rather than
+  through an XML library. All other content remains byte-identical, and every output file is
+  verified by decrypting it again before it is written.
 
-Podrobnosti pre Clauda sú v [CLAUDE.md](CLAUDE.md). V priečinku `cpp/` je voliteľná C++ verzia
-konvertora (`make`, potrebuje `cryptopp`), ktorú nástroj nepotrebuje.
+Notes for coding agents are maintained in [AGENTS.md](AGENTS.md). `CLAUDE.md` imports the same
+file. An optional C++ converter derived from pka2xml is located in `cpp/` (`make`, requires
+Crypto++). The tool does not use it.
 
-## Licencia a poďakovanie
+## Responsible use
 
-Formát súboru zistil Mirco De Zorzi v projekte [mircodz/pka2xml](https://github.com/mircodz/pka2xml)
-(BSD 2-Clause, pozri [LICENSE.pka2xml](LICENSE.pka2xml)). Súbory v `cpp/` sú odvodené z jeho kódu.
+- The tool never displays or modifies an activity's answer network, scoring data, locking
+  configuration or activity password. Activities are solved from their published instructions only.
+- Comply with the academic integrity policy of your course. Do not use this tool where the use of
+  AI assistance is not permitted.
+- Packet Tracer files, extracted instructions and completed labs are excluded from version control
+  (`.gitignore`) and must not be committed.
 
-Cisco a Packet Tracer sú ochranné známky spoločnosti Cisco Systems, Inc. Tento projekt nemá s Ciscom nič spoločné.
+## Acknowledgements and license
+
+The Packet Tracer file format was documented by Mirco De Zorzi in
+[mircodz/pka2xml](https://github.com/mircodz/pka2xml), released under the BSD 2-Clause License
+(see [LICENSE.pka2xml](LICENSE.pka2xml)). The files in `cpp/` are derived from that project.
+
+Cisco and Packet Tracer are trademarks of Cisco Systems, Inc. This project is not affiliated with
+or endorsed by Cisco Systems, Inc.
