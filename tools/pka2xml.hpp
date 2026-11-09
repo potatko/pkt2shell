@@ -224,6 +224,13 @@ inline std::string encrypt_pka(const std::string &input) {
 	return encrypt<CryptoPP::Twofish>(input, key, iv);
 }
 
+/// \see decrypt_nets
+inline std::string encrypt_nets(const std::string &input) {
+	static const std::array<unsigned char, 16> key{ 186, 186, 186, 186, 186, 186, 186, 186, 186, 186, 186, 186, 186, 186, 186, 186 };
+	static const std::array<unsigned char, 16> iv{ 190, 190, 190, 190, 190, 190, 190, 190, 190, 190, 190, 190, 190, 190, 190, 190 };
+	return encrypt2<CryptoPP::Twofish>(input, key, iv);
+}
+
 /// \brief Check if PT file was emitted from a Packet Tracer version prior
 /// to 5. \see uncompress
 ///
