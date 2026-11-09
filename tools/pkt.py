@@ -11,12 +11,14 @@ Commands (FILE may be .pka/.pkt or an already-decrypted .xml):
   links     FILE [--net N]                    list cables (topology)
   instructions FILE [--html]                  activity instructions as Markdown
   set-config FILE DEVICE CFG.txt (-o OUT | --in-place) [--nets 0,1] [--startup]
-                                              replace running-config (and startup with --startup)
+                                              replace running-config (and startup + flash:config.text
+                                              with --startup)
   set-host  FILE DEVICE (-o OUT | --in-place) [--ip A --mask M --gw G --dns D
             --ipv6 ADDR/PREFIX --ipv6-ll LL --ipv6-gw G6 --ipv6-dns D6 --port N] [--nets 0,1]
                                               static addressing for PCs / servers
   set-wan   FILE DEVICE (-o OUT | --in-place) [--ip A --mask M --gw G --dns D] [--nets 0,1]
                                               Internet (WAN) setup of a home wireless router (WRT300N)
+  backup    FILE DEST [--force]               copy FILE to DEST unless DEST already exists
   decrypt   FILE.pka OUT.xml
   encrypt   FILE.xml OUT.pka [--base ORIG.pka]   (--base: allow changes only in networks #0/#1)
 
@@ -229,12 +231,32 @@ def build_cfg(buf, el, lines):
     body = b"".join(b"\n" + ind + b"<LINE>" + escape(l.replace("^C", "\x03").encode()) + b"</LINE>" for l in lines)
     return b"<" + tag + b">" + body + b"\n" + close_ind + b"</" + tag + b">"
 
+def flash_config(buf, e):
+    """CONFIG element of flash:config.text (switch startup config kept in FILE_MANAGER), if any."""
+    fm = child(buf, e, "FILE_MANAGER")
+    stack = [fm] if fm is not None else []
+    while stack:
+        el = stack.pop()
+        for c in children(buf, el):
+            if c.tag == "FILE" and text(buf, child(buf, c, "NAME")) == "config.text":
+                fc = child(buf, c, "FILE_CONTENT")
+                cfg = child(buf, fc, "CONFIG") if fc is not None else None
+                if cfg is not None:
+                    return cfg
+            stack.append(c)
+    return None
+
 def set_config(buf, net_idx, name, lines, which):
     e = find_engine(buf, net_idx, name)
     el = child(buf, e, which)
     if el is None:
         sys.exit(f"{name} in network #{net_idx} has no {which} (not an IOS device?)")
-    return splice(buf, el.os, el.oe, build_cfg(buf, el, lines))
+    buf = splice(buf, el.os, el.oe, build_cfg(buf, el, lines))
+    if which == "STARTUPCONFIG":                 # keep flash:config.text in sync with startup-config
+        fc = flash_config(buf, find_engine(buf, net_idx, name))
+        if fc is not None:
+            buf = splice(buf, fc.os, fc.oe, build_cfg(buf, fc, lines))
+    return buf
 
 # ---------------------------------------------------------------- host addressing
 
@@ -419,8 +441,15 @@ def main():
     p = sp.add_parser("decrypt"); p.add_argument("file"); p.add_argument("out")
     p = sp.add_parser("encrypt"); p.add_argument("file"); p.add_argument("out")
     p.add_argument("--base", help="original .pka/.xml; refuse unless only networks #0/#1 differ from it")
+    p = sp.add_parser("backup"); p.add_argument("file"); p.add_argument("dest")
+    p.add_argument("--force", action="store_true", help="replace DEST if it exists")
     a = ap.parse_args()
 
+    if a.cmd == "backup":                          # never replaces an existing backup
+        if os.path.exists(a.dest) and not a.force:
+            print(f"backup exists, kept: {a.dest}"); return
+        os.makedirs(os.path.dirname(os.path.abspath(a.dest)), exist_ok=True)
+        _atomic_write(a.dest, open(a.file, "rb").read()); print(f"backup written: {a.dest}"); return
     if a.cmd == "decrypt":
         open(a.out, "wb").write(load(a.file)); return
     if a.cmd == "encrypt":
@@ -471,7 +500,11 @@ def main():
         e = find_engine(buf, net, a.device)
         for i, p in enumerate(descendants(buf, e, "PORT", stop=("PORT",))):
             g = lambda t: text(buf, child(buf, p, t)) or ""
-            print(f"  [{i}] {g('TYPE'):26} mac={g('MACADDRESS'):15} ip={g('IP')}/{g('SUBNET')} gw={g('PORT_GATEWAY')} up={g('POWER')}")
+            dns = f" dns={g('PORT_DNS')}" if child(buf, p, "PORT_DNS") is not None else ""
+            print(f"  [{i}] {g('TYPE'):26} mac={g('MACADDRESS'):15} ip={g('IP')}/{g('SUBNET')} gw={g('PORT_GATEWAY')}{dns} up={g('POWER')}")
+        dc = child(buf, e, "DNS_CLIENT")
+        if dc is not None and wan_info(buf, e) is None and child(buf, dc, "SERVER_IP") is not None:
+            print(f"  DNS client: server={text(buf, child(buf, dc, 'SERVER_IP')) or '(none)'}")
         w = wan_info(buf, e)
         if w is not None:
             print(f"  WAN (Internet setup): ip={w['INTERNET_IP_ADDRESS']}/{w['INTERNET_SUBNET_MASK']} "

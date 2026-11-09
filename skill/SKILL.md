@@ -16,6 +16,8 @@ Below, `$PKT` stands for this exact command — write it out in full in every sh
 ```
 
 Quote file paths (lab names contain spaces). Each command takes ~2–5 s (pure-Python crypto).
+Run one `$PKT` command per shell call (no loops, pipes, `&&` or redirections) and use `$PKT backup`
+instead of `cp` — unattended runs only allow plain `$PKT …` calls.
 
 ## Output mode
 
@@ -43,10 +45,13 @@ Packet Tracer first (Packet Tracer would otherwise save its own copy over the re
 
 1. **Inspect**
    - `$PKT list "FILE"` — devices, and which network PT loads (`<- loaded on open`).
-   - `$PKT instructions "FILE" > "{{REPO}}/labs/<name>/zadanie.md"`, then read it fully.
+   - `$PKT instructions "FILE"`, save the output to `{{REPO}}/labs/<name>/zadanie.md` (Write tool),
+     then read it fully.
    - `$PKT links "FILE"` — topology (which device/port connects where).
    - `$PKT show "FILE" <dev>` for every IOS device; `$PKT ports "FILE" <host>` for PCs/servers and
      home wireless routers (the `WAN (Internet setup)` line shows their Internet IP/mask/gateway/DNS).
+     Check **every** value the instructions give for each host — IP, mask, gateway **and DNS** — not
+     only the ones that look wrong; a missing DNS server is a typical planted fault.
 2. **Plan** — addressing (VLSM largest-first when you design it; when the lab leaves the choice open,
    use router = first usable, switch SVI = second usable, PC = last usable) and per-device tasks.
    Show the plan to the user briefly as a table.
@@ -58,14 +63,15 @@ Packet Tracer first (Packet Tracer would otherwise save its own copy over the re
    - Interfaces that must be up: omit `shutdown`. Banner delimiter: `^C`.
    - Local login on VTY = `login local` + `username …`; SSH only = `transport input ssh`.
 4. **Apply**, chaining every edit on the output file:
-   - `new` mode: `cp "FILE" "OUT"` with OUT = `<original name> - completed.pka`, then edit OUT:
+   - `new` mode: `$PKT backup "FILE" "OUT" --force` (copy) with OUT = `<original name> - completed.pka`,
+     then edit OUT:
      ```
      $PKT set-config "OUT" R1 "{{REPO}}/labs/<name>/cfg/R1.txt" --startup --in-place
      $PKT set-host "OUT" PC1 --ip … --mask … --gw … [--dns …] [--ipv6 A/64 --ipv6-ll … --ipv6-gw …] --in-place
      $PKT set-wan "OUT" "Office AP" --ip … --mask … --gw … [--dns …] --in-place   # WRT300N Internet setup
      ```
-   - `overwrite` mode: `mkdir -p "{{REPO}}/labs/<name>"` and `cp -n "FILE" "{{REPO}}/labs/<name>/original.pka"`
-     (`-n`: never overwrite an existing backup — it holds the true original), then run the same commands
+   - `overwrite` mode: `$PKT backup "FILE" "{{REPO}}/labs/<name>/original.pka"` (never replaces an
+     existing backup — it holds the true original), then run the same commands
      on "FILE" with `--in-place`. The file may already contain edits from an earlier run: still check every
      device against the instructions.
    Then re-check with `$PKT show "OUT" <dev>` / `$PKT ports "OUT" <host>`.

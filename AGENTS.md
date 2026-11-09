@@ -17,13 +17,14 @@ Editing Cisco Packet Tracer .pka/.pkt files directly. `CLAUDE.md` imports this f
 - `show F.pka DEV [--net N] [--startup]` — IOS config as text (defaults to the network PT loads).
 - `ports F.pka DEV` — ports with MAC/IP.
 - `links F.pka [--net N]` — cables / topology (device, port <-> device, port).
+- `backup F DEST [--force]` — copy unless DEST exists. `ports` also prints host DNS.
 - `decrypt F.pka OUT.xml` / `encrypt F.xml OUT.pka [--base ORIG.pka]` — whole-file conversion. With `--base`,
   encrypt refuses unless the XML differs from ORIG only inside networks #0/#1 (answer network and ACTIVITY
   byte-identical) and prints the changed devices. The skill's XML fallback (hand-edit settings no command
   covers) always encrypts with `--base`.
 - `instructions F.pka [--html]` — activity instructions (ACTIVITY/INSTRUCTIONS/PAGE, CDATA HTML) as Markdown.
 - `set-config F.pka DEV cfg.txt (-o OUT.pka | --in-place) [--nets 0,1] [--startup]` — replace running-config
-  (+ startup-config). Same text goes to every listed network.
+  (+ startup-config and the switch's `flash:config.text`, FILE_MANAGER, with --startup). Same text goes to every listed network.
 - `set-host F.pka DEV (-o OUT.pka | --in-place) --ip --mask --gw --dns --ipv6 A/P --ipv6-ll --ipv6-gw --ipv6-dns [--port N]`
   — PC/server static addressing.
 - `set-wan F.pka DEV (-o OUT.pka | --in-place) --ip --mask --gw --dns` — Internet (WAN) setup of a home
@@ -32,7 +33,7 @@ Editing Cisco Packet Tracer .pka/.pkt files directly. `CLAUDE.md` imports this f
   not appends). Banner delimiter: write `^C`. Output is verified by an encrypt→decrypt round trip.
 - The tool refuses to show or edit the answer network (last of three). Write to the user's original file
   only in the skill's `overwrite` output mode (default chosen via `install.py --output`), and only after
-  backing it up to `labs/<name>/original.pka` with `cp -n` (never overwrite an existing backup — a second run
+  backing it up to `labs/<name>/original.pka` with `pkt.py backup` (never overwrites an existing backup — a second run
   would otherwise replace the true original with an already-edited file). Writes are atomic (temp file + rename).
 
 ## XML facts (verified in PT 9.0.1 on "17.8.2 Skills Integration Challenge", file VERSION 8.0.0.0216)
