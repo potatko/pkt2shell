@@ -50,7 +50,10 @@ int main(int argc, char *argv[]) {
       write_file(argv[3], pka2xml::decrypt_pka(read_file(argv[2])));
     } else if (mode == "-e") {
       write_file(argv[3], pka2xml::encrypt_pka(read_file(argv[2])));
-    } else {
+    } else if (mode == "--forge" && argc == 3) {
+      write_file(argv[2], pka2xml::encrypt_nets("foobar~foobar~foobar~foobar~1700000000"));
+    }
+    else {
       help();
     }
   } catch (...) {
