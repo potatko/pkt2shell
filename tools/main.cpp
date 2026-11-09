@@ -20,10 +20,12 @@
 
   -d <in> <out>   decrypt pka/pkt to xml
   -e <in> <out>   encrypt xml to pka/pkt
+  --forge <out>   forge authentication file to bypass login
 
 examples:
   pka2xml -d foobar.pka foobar.xml
   pka2xml -e foobar.xml foobar.pka
+  pka2xml --forge nets
 )");
   std::exit(1);
 }
