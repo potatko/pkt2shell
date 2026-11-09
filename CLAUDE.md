@@ -1,9 +1,11 @@
 # pktR — editing Cisco Packet Tracer .pka/.pkt files directly
 
 ## Tooling
-- `tools/pka2xml` — derived from github.com/mircodz/pka2xml, trimmed to `-d`/`-e` only, binary I/O.
-  Needs Homebrew `cryptopp` (dynamic link). Build with `make`.
-- `tools/pka2xml -d in.pka out.xml` / `tools/pka2xml -e in.xml out.pka`. Round trip is byte-identical.
+- `tools/ptcrypto.py` — pure-Python .pka/.pkt codec (Twofish + EAX + zlib), no dependencies.
+  Byte-identical to mircodz/pka2xml. `tools/pkt.py` loads it via importlib (works under `python -I`).
+- `cpp/` — optional C++ converter derived from pka2xml (`make`, needs Homebrew `cryptopp`). Not used by pkt.py.
+- `skill/SKILL.md` — Claude Code skill template; `install.py` fills in paths and installs it to
+  `~/.claude/skills/packet-tracer/`. Re-run install.py after changing the template.
 - Do NOT use upstream `patch.c` or `--forge` (bypass Cisco login / mark activities complete). Never edit the
   answer network, COMPARISONS, scoring or activity password.
 
@@ -12,6 +14,7 @@
 - `show F.pka DEV [--net N] [--startup]` — IOS config as text (defaults to the network PT loads).
 - `ports F.pka DEV` — ports with MAC/IP.
 - `links F.pka [--net N]` — cables / topology (device, port <-> device, port).
+- `decrypt F.pka OUT.xml` / `encrypt F.xml OUT.pka` — whole-file conversion.
 - `instructions F.pka [--html]` — activity instructions (ACTIVITY/INSTRUCTIONS/PAGE, CDATA HTML) as Markdown.
 - `set-config F.pka DEV cfg.txt -o OUT.pka [--nets 0,1] [--startup]` — replace running-config
   (+ startup-config). Same text goes to every listed network.

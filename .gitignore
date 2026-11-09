@@ -1,5 +1,5 @@
 # build output
-tools/pka2xml
+cpp/pka2xml
 __pycache__/
 
 # Packet Tracer files and decrypted content (Cisco material, lab work) — never commit

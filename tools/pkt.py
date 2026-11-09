@@ -22,37 +22,32 @@ Config text: one IOS line per line; write banner delimiters as ^C (stored as byt
 Activity files contain 3 networks: #0 saved, #1 initial (loaded for a fresh activity),
 #2 answer network. Edits default to #0 and #1; #2 is never modified.
 """
-import argparse, os, re, subprocess, sys, tempfile
+import argparse, importlib.util, os, re, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-PKA2XML = os.path.join(HERE, "pka2xml")
+
+# load the sibling module explicitly (works under `python -I`, which drops the script dir from sys.path)
+_spec = importlib.util.spec_from_file_location("ptcrypto", os.path.join(HERE, "ptcrypto.py"))
+ptcrypto = importlib.util.module_from_spec(_spec); _spec.loader.exec_module(ptcrypto)
 
 # ---------------------------------------------------------------- crypto I/O
 
-def _run_pka2xml(flag, src, dst):
-    r = subprocess.run([PKA2XML, flag, src, dst], capture_output=True)
-    if r.returncode != 0:
-        sys.exit(f"pka2xml {flag} failed: {r.stderr.decode(errors='replace')}")
-
 def load(path):
+    raw = open(path, "rb").read()
     if path.lower().endswith(".xml"):
-        return open(path, "rb").read()
-    with tempfile.TemporaryDirectory() as td:
-        out = os.path.join(td, "x.xml")
-        _run_pka2xml("-d", path, out)
-        return open(out, "rb").read()
+        return raw
+    try:
+        return ptcrypto.decrypt_pka(raw)
+    except Exception as e:
+        sys.exit(f"cannot decrypt {path}: {e}")
 
 def save(data, path):
     if path.lower().endswith(".xml"):
         open(path, "wb").write(data); return
-    with tempfile.TemporaryDirectory() as td:
-        x = os.path.join(td, "x.xml"); x2 = os.path.join(td, "y.xml"); p = os.path.join(td, "x.pka")
-        open(x, "wb").write(data)
-        _run_pka2xml("-e", x, p)
-        _run_pka2xml("-d", p, x2)          # verify round trip before touching OUT
-        if open(x2, "rb").read() != data:
-            sys.exit("round-trip verification failed; output not written")
-        open(path, "wb").write(open(p, "rb").read())
+    enc = ptcrypto.encrypt_pka(data)
+    if ptcrypto.decrypt_pka(enc) != data:          # verify round trip before touching OUT
+        sys.exit("round-trip verification failed; output not written")
+    open(path, "wb").write(enc)
 
 # ---------------------------------------------------------------- tiny XML span locator
 
@@ -351,9 +346,9 @@ def main():
     a = ap.parse_args()
 
     if a.cmd == "decrypt":
-        _run_pka2xml("-d", a.file, a.out); return
+        open(a.out, "wb").write(load(a.file)); return
     if a.cmd == "encrypt":
-        _run_pka2xml("-e", a.file, a.out); return
+        save(open(a.file, "rb").read(), a.out); return
 
     buf = load(a.file)
 
