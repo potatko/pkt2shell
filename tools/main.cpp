@@ -20,7 +20,6 @@
 
   -d <in> <out>   decrypt pka/pkt to xml
   -e <in> <out>   encrypt xml to pka/pkt
-  --forge <out>   forge authentication file to bypass login
 
 examples:
   pka2xml -d foobar.pka foobar.xml
@@ -50,9 +49,7 @@ int main(int argc, char *argv[]) {
       write_file(argv[3], pka2xml::decrypt_pka(read_file(argv[2])));
     } else if (mode == "-e") {
       write_file(argv[3], pka2xml::encrypt_pka(read_file(argv[2])));
-    } else if (mode == "--forge" && argc == 3) {
-      write_file(argv[2], pka2xml::encrypt_nets("foobar~foobar~foobar~foobar~1700000000"));
-    }
+    } 
     else {
       help();
     }
