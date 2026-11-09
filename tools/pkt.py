@@ -6,10 +6,14 @@ else in the file stays byte-identical (PT stores raw control chars, CDATA, etc.)
 
 Commands (FILE may be .pka/.pkt or an already-decrypted .xml):
   list      FILE                              networks + devices
-  show      FILE DEVICE [--net N] [--startup] print IOS config
-  ports     FILE DEVICE [--net N]             list ports with MAC / IP
-  links     FILE [--net N]                    list cables (topology)
+  show      FILE DEVICE [--net N | --answer] [--startup]   print IOS config
+  ports     FILE DEVICE [--net N | --answer]  list ports with MAC / IP
+  links     FILE [--net N | --answer]         list cables (topology)
   instructions FILE [--html]                  activity instructions as Markdown
+  checklist FILE [--dev NAME]                 graded items with expected values (answer key)
+  copy-answer FILE [DEVICE ...] (-o OUT | --in-place) [--all] [--links] [--whole-network] [--nets 0,1]
+                                              copy devices / cabling / whole network from the answer
+                                              network (sample solution) into networks #0/#1
   set-config FILE DEVICE CFG.txt (-o OUT | --in-place) [--nets 0,1] [--startup]
                                               replace running-config (and startup + flash:config.text
                                               with --startup)
@@ -24,7 +28,8 @@ Commands (FILE may be .pka/.pkt or an already-decrypted .xml):
 
 Config text: one IOS line per line; write banner delimiters as ^C (stored as byte 0x03).
 Activity files contain 3 networks: #0 saved, #1 initial (loaded for a fresh activity),
-#2 answer network. Edits default to #0 and #1; #2 is never modified.
+#2 answer network (sample solution). Edits default to #0 and #1; #2 is only read (--answer,
+checklist, copy-answer) and never modified, nor are COMPARISONS / scoring / activity settings.
 """
 import argparse, importlib.util, os, re, sys
 
@@ -162,10 +167,15 @@ def links(buf, net):
                     ports[1] if len(ports) > 1 else "", text(buf, child(buf, l, "TYPE")) or ""))
     return res
 
-def find_engine(buf, net_idx, name):
+def answer_idx(buf):
+    """Index of the answer network (the sample solution PT grades against), or None."""
     nets, activity = networks(buf)
-    if activity and len(nets) >= 3 and net_idx == len(nets) - 1:
-        sys.exit(f"network #{net_idx} is the answer network; not shown or edited")
+    return len(nets) - 1 if activity and len(nets) >= 3 else None
+
+def find_engine(buf, net_idx, name, read_answer=False):
+    if net_idx == answer_idx(buf) and not read_answer:
+        sys.exit(f"network #{net_idx} is the answer network; read it with --answer, it is never edited")
+    nets, _ = networks(buf)
     for n, _t, _m, e in devices(buf, nets[net_idx]):
         if n == name:
             return e
@@ -354,6 +364,125 @@ def set_wan(buf, net_idx, name, a):
         buf = set_leaf(buf, dc, "SERVER_IP", a.dns)
     return buf
 
+# ---------------------------------------------------------------- answer key (read-only) and copying from it
+
+def checklist(buf):
+    """Graded items: checked leaves (checkType="2") of the activity's COMPARISONS tree,
+    as (path, expected value, points, component). Paths start below the root "Network" node."""
+    cmp_ = child(buf, root_el(buf), "COMPARISONS")
+    out = []
+    def walk(el, path):
+        for n in children(buf, el):
+            if n.tag != "NODE": continue
+            nm = child(buf, n, "NAME")
+            if nm is None: continue
+            p = path + [text(buf, nm)]
+            if any(c.tag == "NODE" for c in children(buf, n)):
+                walk(n, p); continue
+            ct = re.search(rb'checkType="(\d+)"', nm.attrs)
+            if ct and ct.group(1) == b"2":
+                v = re.search(rb'nodeValue="([^"]*)"', nm.attrs)
+                out.append((p[1:] if p[0] == "Network" else p,
+                            unescape(v.group(1)).decode("utf-8", "replace") if v else "",
+                            text(buf, child(buf, n, "POINTS")) or "", text(buf, child(buf, n, "COMPONENTS")) or ""))
+    if cmp_ is not None:
+        walk(cmp_, [])
+    return out
+
+def _norm(s):
+    return re.sub(r"[\s_\-]+", "", (s or "").lower())
+
+def match_devices(buf, src, dst):
+    """Pair devices of network `src` (answer) with `dst`: exact name, then name ignoring case/spaces,
+    then the only unpaired device of the same type+model on both sides. Returns {src_name: dst_name}."""
+    s, d = devices(buf, src), devices(buf, dst)
+    pairs, used = {}, set()
+    for key in (lambda x: x, _norm):
+        for n, *_ in s:
+            if n in pairs: continue
+            c = [x for x, *_ in d if x not in used and key(x) == key(n)]
+            if len(c) == 1:
+                pairs[n] = c[0]; used.add(c[0])
+    for n, t, m, _e in s:
+        if n in pairs: continue
+        cs = [x for x, t2, m2, _ in s if x not in pairs and (t2, m2) == (t, m)]
+        cd = [x for x, t2, m2, _ in d if x not in used and (t2, m2) == (t, m)]
+        if len(cs) == 1 and len(cd) == 1:
+            pairs[n] = cd[0]; used.add(cd[0])
+    return pairs
+
+REF = re.compile(rb"save-ref-id:[0-9]+")
+
+def _refs(buf, net):
+    return {n: text(buf, child(buf, e, "SAVE_REF_ID")) for n, _t, _m, e in devices(buf, net)}
+
+def translate_refs(blob, rmap):
+    """Rewrite answer-network device references to the target network's; return (blob, unmapped refs)."""
+    missing = set()
+    def sub(m):
+        r = m.group().decode()
+        if r in rmap: return rmap[r].encode()
+        missing.add(r); return m.group()
+    return REF.sub(sub, blob), missing
+
+def copy_answer(buf, n, want, do_links):
+    """Copy device ENGINEs (and optionally the cabling) of the answer network into network #n.
+    Each device keeps its own SAVE_REF_ID and WORKSPACE (position); references between devices are
+    translated. The answer network itself is only read."""
+    ai = answer_idx(buf)
+    nets, _ = networks(buf)
+    pairs = match_devices(buf, nets[ai], nets[n])
+    sref, dref = _refs(buf, nets[ai]), _refs(buf, nets[n])
+    rmap = {sref[a]: dref[b] for a, b in pairs.items() if sref.get(a) and dref.get(b)}
+    inv = {b: a for a, b in pairs.items()}
+    for a, b in pairs.items():
+        if a != b: print(f"  #{n}: {b!r} <- answer {a!r} (renamed)")
+    names = sorted(inv) if want == "all" else want
+    for name in names:
+        src_name = inv.get(name) or (name if name in pairs else None)
+        if src_name is None:
+            sys.exit(f"{name!r}: no counterpart in the answer network (network #{n} devices: "
+                     f"{', '.join(sorted(dref))}; answer: {', '.join(sorted(sref))}). "
+                     f"Use --whole-network if the activity adds or replaces devices.")
+        dst_name = pairs[src_name]
+        nets, _ = networks(buf)
+        se = next(e for x, _t, _m, e in devices(buf, nets[ai]) if x == src_name)
+        dd = next((x, t, m, e) for x, t, m, e in devices(buf, nets[n]) if text(buf, child(buf, e, "SAVE_REF_ID")) == dref[dst_name])
+        st = next((t, m) for x, t, m, _e in devices(buf, nets[ai]) if x == src_name)
+        if st != (dd[1], dd[2]):
+            msg = (f"{dst_name!r} is {dd[1]} {dd[2]} but the answer has {st[0]} {st[1]} — the activity replaces "
+                   f"the device; use --whole-network or swap it in Packet Tracer")
+            if want != "all": sys.exit(msg)
+            print(f"  #{n}: SKIPPED {msg}"); continue
+        de = dd[3]
+        blob, miss = translate_refs(buf[se.os:se.oe], rmap)
+        if miss:
+            print(f"  warning: {dst_name}: references to answer-only objects kept as is: {', '.join(sorted(miss))}")
+        if blob == buf[de.os:de.oe]:
+            print(f"  #{n}: {dst_name}: already identical"); continue
+        buf = splice(buf, de.os, de.oe, blob)
+        print(f"  #{n}: {dst_name}: copied from answer {src_name!r}")
+    if do_links:
+        nets, _ = networks(buf)
+        sl = child(buf, child(buf, nets[ai], "NETWORK"), "LINKS")
+        dl = child(buf, child(buf, nets[n], "NETWORK"), "LINKS")
+        if sl is None or dl is None:
+            sys.exit("no LINKS element in one of the networks")
+        blob, miss = translate_refs(buf[sl.os:sl.oe], rmap)
+        if miss:
+            sys.exit(f"answer cabling connects devices with no counterpart in network #{n}; use --whole-network")
+        if blob == buf[dl.os:dl.oe]:
+            print(f"  #{n}: links already identical")
+        else:
+            buf = splice(buf, dl.os, dl.oe, blob)
+            print(f"  #{n}: links copied ({len(links(buf, networks(buf)[0][n]))} cables)")
+    return buf
+
+def copy_whole_network(buf, n):
+    ai = answer_idx(buf)
+    nets, _ = networks(buf)
+    return splice(buf, nets[n].os, nets[n].oe, buf[nets[ai].os:nets[ai].oe])
+
 # ---------------------------------------------------------------- activity instructions
 
 def instructions_html(buf):
@@ -419,13 +548,25 @@ def _out_args(p):
     g.add_argument("-o", "--out", help="write the result to OUT (may equal FILE)")
     g.add_argument("--in-place", action="store_true", help="overwrite FILE")
 
+def _net_args(p):
+    g = p.add_mutually_exclusive_group()
+    g.add_argument("--net", type=int)
+    g.add_argument("--answer", action="store_true", help="read the answer network (sample solution)")
+
+def pick_net(buf, a):
+    if getattr(a, "answer", False):
+        ai = answer_idx(buf)
+        if ai is None: sys.exit("no answer network (not an activity file)")
+        return ai
+    return loaded_net(buf) if a.net is None else a.net
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sp = ap.add_subparsers(dest="cmd", required=True)
     p = sp.add_parser("list"); p.add_argument("file")
     p = sp.add_parser("show"); p.add_argument("file"); p.add_argument("device")
-    p.add_argument("--net", type=int); p.add_argument("--startup", action="store_true")
-    p = sp.add_parser("ports"); p.add_argument("file"); p.add_argument("device"); p.add_argument("--net", type=int)
+    _net_args(p); p.add_argument("--startup", action="store_true")
+    p = sp.add_parser("ports"); p.add_argument("file"); p.add_argument("device"); _net_args(p)
     p = sp.add_parser("set-config"); p.add_argument("file"); p.add_argument("device"); p.add_argument("cfg")
     _out_args(p); p.add_argument("--nets"); p.add_argument("--startup", action="store_true")
     p = sp.add_parser("set-host"); p.add_argument("file"); p.add_argument("device")
@@ -437,7 +578,14 @@ def main():
     for f in ("ip", "mask", "gw", "dns"):
         p.add_argument("--" + f)
     p = sp.add_parser("instructions"); p.add_argument("file"); p.add_argument("--html", action="store_true")
-    p = sp.add_parser("links"); p.add_argument("file"); p.add_argument("--net", type=int)
+    p = sp.add_parser("links"); p.add_argument("file"); _net_args(p)
+    p = sp.add_parser("checklist"); p.add_argument("file"); p.add_argument("--dev", help="only this device")
+    p = sp.add_parser("copy-answer"); p.add_argument("file"); p.add_argument("devices", nargs="*")
+    _out_args(p); p.add_argument("--nets")
+    p.add_argument("--all", action="store_true", help="every device that has a counterpart in the answer")
+    p.add_argument("--links", action="store_true", help="also copy the cabling")
+    p.add_argument("--whole-network", action="store_true",
+                   help="replace networks #0/#1 entirely with the answer network (last resort)")
     p = sp.add_parser("decrypt"); p.add_argument("file"); p.add_argument("out")
     p = sp.add_parser("encrypt"); p.add_argument("file"); p.add_argument("out")
     p.add_argument("--base", help="original .pka/.xml; refuse unless only networks #0/#1 differ from it")
@@ -468,10 +616,10 @@ def main():
         print("\n\n---\n\n".join(pages if a.html else [html_to_md(h) for h in pages])); return
 
     if a.cmd == "links":
-        net = loaded_net(buf) if a.net is None else a.net
-        nets, activity = networks(buf)
-        if activity and len(nets) >= 3 and net == len(nets) - 1:
-            sys.exit(f"network #{net} is the answer network; not shown")
+        net = pick_net(buf, a)
+        nets, _ = networks(buf)
+        if net == answer_idx(buf) and not a.answer:
+            sys.exit(f"network #{net} is the answer network; read it with --answer")
         for fa, pa, fb, pb, t in links(buf, nets[net]):
             print(f"{fa:24} {pa:24} <-> {fb:24} {pb:24} {t}")
         return
@@ -489,15 +637,13 @@ def main():
         return
 
     if a.cmd == "show":
-        net = loaded_net(buf) if a.net is None else a.net
-        e = find_engine(buf, net, a.device)
+        e = find_engine(buf, pick_net(buf, a), a.device, read_answer=a.answer)
         el = child(buf, e, "STARTUPCONFIG" if a.startup else "RUNNINGCONFIG")
         if el is None: sys.exit(f"{a.device} has no IOS config")
         print("\n".join(cfg_lines(buf, el))); return
 
     if a.cmd == "ports":
-        net = loaded_net(buf) if a.net is None else a.net
-        e = find_engine(buf, net, a.device)
+        e = find_engine(buf, pick_net(buf, a), a.device, read_answer=a.answer)
         for i, p in enumerate(descendants(buf, e, "PORT", stop=("PORT",))):
             g = lambda t: text(buf, child(buf, p, t)) or ""
             dns = f" dns={g('PORT_DNS')}" if child(buf, p, "PORT_DNS") is not None else ""
@@ -511,6 +657,33 @@ def main():
                   f"gw={w['DEFAULT_GATEWAY']} dns={w['DNS']} conn_type={w['INTERNET_CONNECTION_TYPE']}"
                   f"  (edit with set-wan)")
         return
+
+    if a.cmd == "checklist":
+        items = checklist(buf)
+        if not items: sys.exit("no graded items (not an activity file, or nothing is checked)")
+        groups = {}
+        for path, val, pts, comp in items:
+            groups.setdefault(path[0], []).append((path[1:], val, pts, comp))
+        total = 0
+        for g, rows in groups.items():
+            if a.dev and g != a.dev: continue
+            pts = sum(int(p) for _p, _v, p, _c in rows if p.isdigit()); total += pts
+            print(f"{g}  ({len(rows)} items, {pts} pts)")
+            for path, val, p, comp in rows:
+                print(f"  {' > '.join(path) or '(self)'} = {val!r}   [{p} pt, {comp}]")
+        if not a.dev: print(f"total: {len(items)} items, {total} pts")
+        return
+
+    if a.cmd == "copy-answer":
+        if answer_idx(buf) is None: sys.exit("no answer network (not an activity file)")
+        if not (a.devices or a.all or a.links or a.whole_network):
+            sys.exit("nothing to copy: name devices, or use --all / --links / --whole-network")
+        for n in editable_nets(buf, a.nets):
+            if a.whole_network:
+                buf = copy_whole_network(buf, n); print(f"  #{n}: replaced with the answer network")
+            else:
+                buf = copy_answer(buf, n, "all" if a.all else a.devices, a.links)
+        save(buf, a.out); print(f"answer copied -> {a.out}"); return
 
     if a.cmd == "set-config":
         lines = open(a.cfg, encoding="utf-8").read().splitlines()

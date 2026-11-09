@@ -84,6 +84,11 @@ overridden for a single request by stating it explicitly, for example *"overwrit
 5. If the activity is not complete, paste the failing *Check Results* items into the session.
    The agent corrects the configuration and updates the result.
 
+The agent first solves the activity from its instructions, then compares the result with the
+activity's answer key (`checklist`, the graded items with their expected values). Any item it could
+not complete — or has no command for — is taken from the sample solution stored in the activity
+(`--answer`, `copy-answer`).
+
 ### Post-completion checks
 
 - **SSH:** RSA key generation is an exec-time operation and may not be applied when the file is
@@ -118,9 +123,11 @@ The agent invokes `tools/pkt.py`. It can also be used directly:
 |---|---|
 | `list FILE` | Networks and devices; marks the network Packet Tracer loads on open. |
 | `instructions FILE [--html]` | Activity instructions as Markdown (or raw HTML). |
-| `links FILE [--net N]` | Cabling between devices (topology). |
-| `show FILE DEVICE [--net N] [--startup]` | IOS running- or startup-configuration as text. |
-| `ports FILE DEVICE [--net N]` | Interfaces with MAC and IP addresses. |
+| `links FILE [--net N \| --answer]` | Cabling between devices (topology). |
+| `show FILE DEVICE [--net N \| --answer] [--startup]` | IOS running- or startup-configuration as text. `--answer` reads the sample solution. |
+| `ports FILE DEVICE [--net N \| --answer]` | Interfaces with MAC and IP addresses. |
+| `checklist FILE [--dev NAME]` | Graded items of the activity with expected values and points (answer key). |
+| `copy-answer FILE [DEVICE ...] (-o OUT \| --in-place) [--all] [--links] [--whole-network]` | Copies devices, cabling or the whole network from the sample solution into networks #0/#1. |
 | `set-config FILE DEVICE CFG (-o OUT \| --in-place) [--startup] [--nets 0,1]` | Replaces the IOS configuration with the contents of `CFG`. |
 | `set-host FILE DEVICE (-o OUT \| --in-place) [--ip --mask --gw --dns --ipv6 --ipv6-ll --ipv6-gw --ipv6-dns --port]` | Static addressing for PCs and servers. |
 | `set-wan FILE DEVICE (-o OUT \| --in-place) [--ip --mask --gw --dns]` | Internet (WAN) setup of a home wireless router (Linksys WRT300N). |
@@ -142,8 +149,9 @@ python3 tools/pkt.py set-host result.pka PC1 --ip 192.168.0.10 --mask 255.255.25
   EAX mode, and obfuscated with position-dependent XOR passes. `tools/ptcrypto.py` implements this
   in pure Python. Its output is byte-identical to that of the reference implementation (pka2xml).
 - **Activity structure.** An activity contains three networks: `#0` (saved progress), `#1`
-  (initial state) and `#2` (answer network). A new activity is opened from `#1`, and a saved one from
-  `#0`. Edits are applied to both.
+  (initial state) and `#2` (answer network, the sample solution). A new activity is opened from `#1`,
+  and a saved one from `#0`. Edits are applied to both. The graded items are listed in the
+  `COMPARISONS` tree (expected value and points per item).
 - **Network devices.** The `RUNNINGCONFIG` element holds plain IOS commands that Packet Tracer
   replays when the file is opened, so configuration takes effect immediately. `STARTUPCONFIG` is
   applied on `reload`.
@@ -161,8 +169,9 @@ Crypto++). The tool does not use it.
 
 ## Responsible use
 
-- The tool never displays or modifies an activity's answer network, scoring data, locking
-  configuration or activity password. Activities are solved from their published instructions only.
+- The tool never modifies an activity's answer network, scoring data, locking configuration or
+  activity password; `encrypt --base` refuses any such change. It reads the answer network and the
+  graded checklist to verify and complete a solution.
 - Comply with the academic integrity policy of your course. Do not use this tool where the use of
   AI assistance is not permitted.
 - Packet Tracer files, extracted instructions and completed labs are excluded from version control

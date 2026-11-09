@@ -10,13 +10,19 @@ Editing Cisco Packet Tracer .pka/.pkt files directly. `CLAUDE.md` imports this f
   and installs it to `~/.claude/skills/packet-tracer/` and `~/.agents/skills/packet-tracer/` (Codex).
   Re-run install.py after changing the template.
 - Do NOT use upstream `patch.c` or `--forge` (bypass Cisco login / mark activities complete). Never edit the
-  answer network, COMPARISONS, scoring or activity password.
+  answer network, COMPARISONS, scoring or activity password. Reading them is allowed (answer key, below).
 
 ## Main tool: `tools/pkt.py` (run with `python3 -I tools/pkt.py ...`)
 - `list F.pka` — networks (saved/initial/answer, which one PT loads) and devices.
-- `show F.pka DEV [--net N] [--startup]` — IOS config as text (defaults to the network PT loads).
-- `ports F.pka DEV` — ports with MAC/IP.
-- `links F.pka [--net N]` — cables / topology (device, port <-> device, port).
+- `show F.pka DEV [--net N | --answer] [--startup]` — IOS config as text (defaults to the network PT loads;
+  `--answer` reads the answer network = sample solution).
+- `ports F.pka DEV [--answer]` — ports with MAC/IP.
+- `links F.pka [--net N | --answer]` — cables / topology (device, port <-> device, port).
+- `checklist F.pka [--dev NAME]` — graded items: checked leaves (`checkType="2"`) of the root `COMPARISONS` tree
+  with expected value (`nodeValue`), points and component. This is exactly what Check Results scores.
+- `copy-answer F.pka [DEV ...] (-o OUT | --in-place) [--all] [--links] [--whole-network] [--nets 0,1]` — copy from
+  the answer network into #0/#1: a device's whole ENGINE (keeps its SAVE_REF_ID and WORKSPACE; other
+  `save-ref-id:` references are translated), the LINKS (cabling), or the whole network (last resort).
 - `backup F DEST [--force]` — copy unless DEST exists. `ports` also prints host DNS.
 - `decrypt F.pka OUT.xml` / `encrypt F.xml OUT.pka [--base ORIG.pka]` — whole-file conversion. With `--base`,
   encrypt refuses unless the XML differs from ORIG only inside networks #0/#1 (answer network and ACTIVITY
@@ -31,7 +37,7 @@ Editing Cisco Packet Tracer .pka/.pkt files directly. `CLAUDE.md` imports this f
   wireless router (Linksys WRT300N). `ports` prints the current WAN line for such devices.
 - Workflow: `show` → edit full config text → `set-config`. Write a full, consistent config (it replaces,
   not appends). Banner delimiter: write `^C`. Output is verified by an encrypt→decrypt round trip.
-- The tool refuses to show or edit the answer network (last of three). Write to the user's original file
+- The tool never edits the answer network (last of three); it reads it only with `--answer`, `checklist`, `copy-answer`. Write to the user's original file
   only in the skill's `overwrite` output mode (default chosen via `install.py --output`), and only after
   backing it up to `labs/<name>/original.pka` with `pkt.py backup` (never overwrites an existing backup — a second run
   would otherwise replace the true original with an already-edited file). Writes are atomic (temp file + rename).
@@ -56,3 +62,11 @@ Editing Cisco Packet Tracer .pka/.pkt files directly. `CLAUDE.md` imports this f
 - Text contains raw control chars (e.g. `^C` = 0x03 in banners) → invalid XML 1.0. Parse only for reading
   (sanitize first); make edits as byte-level string replacements to preserve the file exactly.
 - Device lookup: `<NAME translate="true">R1</NAME>` inside `<DEVICE><ENGINE>`; ports identified by `MACADDRESS`.
+- Answer key: root `COMPARISONS` (sibling of the networks) is a tree Network > device > field; leaves carry
+  `checkType` (0 = not graded, 2 = graded; 1 = partly checked head node), `nodeValue` (expected value) and
+  `POINTS`. Comparison nodes are keyed by device **name** (the answer may rename a device).
+- Each network has its own `SAVE_REF_ID`s, MACs and coordinates; `LINK/CABLE/FROM|TO` and e.g. `DCEDEV`
+  reference devices by `save-ref-id:N`. The answer network can contain cables the initial one lacks and
+  a different device model (activity replaces a device) — `copy-answer` skips those unless `--whole-network`.
+- Unverified in PT: that every setting copied by `copy-answer` is scored (file validity and untouched
+  answer/activity data are verified with `encrypt --base`).
