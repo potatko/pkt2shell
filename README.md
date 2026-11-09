@@ -171,6 +171,3 @@ Crypto++). The tool does not use it.
 The Packet Tracer file format was documented by Mirco De Zorzi in
 [mircodz/pka2xml](https://github.com/mircodz/pka2xml), released under the BSD 2-Clause License
 (see [LICENSE.pka2xml](LICENSE.pka2xml)). The files in `cpp/` are derived from that project.
-
-Cisco and Packet Tracer are trademarks of Cisco Systems, Inc. This project is not affiliated with
-or endorsed by Cisco Systems, Inc.
