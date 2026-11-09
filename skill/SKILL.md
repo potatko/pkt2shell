@@ -69,15 +69,39 @@ Packet Tracer first (Packet Tracer would otherwise save its own copy over the re
      on "FILE" with `--in-place`. The file may already contain edits from an earlier run: still check every
      device against the instructions.
    Then re-check with `$PKT show "OUT" <dev>` / `$PKT ports "OUT" <host>`.
+   For anything these commands cannot set, use the XML fallback below — do not hand it to the user.
 5. **Hand over** — tell the user the output path (and the backup path in `overwrite` mode) and what to check in Packet Tracer
    (open it with File → Open): the completion percentage and Check Results; for SSH labs
    `show ip ssh` on the router (if SSH is not enabled, they run `crypto key generate rsa` once in the
    CLI). Ask them to paste failing Check Results items, then fix and re-apply.
+
+## XML fallback (when no command covers a setting)
+
+When a task needs a device setting that `set-config` / `set-host` / `set-wan` do not cover (e.g. wireless
+SSID/WPA key, DHCP pool, server DNS/HTTP records, structured fields of non-IOS devices), edit the
+decrypted XML directly instead of giving the user a manual GUI step:
+
+1. Apply all tool commands first, then: `$PKT decrypt "OUT" "{{REPO}}/labs/<name>/work.xml"`
+   (in `overwrite` mode OUT is FILE).
+2. Find the device: Grep for `<NAME translate="true">DEV</NAME>` — it occurs once per network; the
+   occurrences are network #0, #1 and #2 (answer) in this order. Edit **only the first two**
+   (Grep `-n` for `<PACKETTRACER5>` to see where networks start). Read a few hundred lines around the
+   device to find the field, and compare with similar devices/fields in the same network for the format.
+3. Change the value with the Edit tool — one exact `old_string` per occurrence, never `replace_all`
+   (it would also hit the answer network). Change values only; do not add, remove or reorder elements
+   unless the format is clear from another device in the same network. Never touch the answer
+   network, `ACTIVITY`, `COMPARISONS`, scoring, locking or passwords.
+4. `$PKT encrypt "{{REPO}}/labs/<name>/work.xml" "OUT" --base "OUT"` — refuses (and writes nothing) if
+   anything outside networks #0/#1 changed; prints which devices changed. Check that list matches
+   your intent, then re-check with `ports` / `show`.
+5. In the hand-over, list which settings were made by hand-editing XML (unverified field → the user
+   should check that device in Packet Tracer). Only when a setting truly cannot be found in the XML,
+   give the user the exact GUI/CLI steps.
 
 ## Known limits (see AGENTS.md)
 
 - Verified: IOS running-config replay on open; PC/server addressing via set-host; home wireless router
   (WRT300N) Internet/WAN setup via set-wan — do it with the tool, do not hand it to the user as a GUI step.
 - Unverified: RSA keys and VLAN databases (exec-time / `ENGINE/VLANS` state), server services
-  (DNS/HTTP/DHCP records), wireless SSID/security. When a lab needs these, say so and give the user the exact CLI
-  commands as a fallback.
+  (DNS/HTTP/DHCP records), wireless SSID/security. When a lab needs these, use the XML fallback above;
+  for RSA keys also give the user the CLI command (`crypto key generate rsa`) in case the replay misses it.

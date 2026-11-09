@@ -124,7 +124,7 @@ The agent invokes `tools/pkt.py`. It can also be used directly:
 | `set-config FILE DEVICE CFG (-o OUT \| --in-place) [--startup] [--nets 0,1]` | Replaces the IOS configuration with the contents of `CFG`. |
 | `set-host FILE DEVICE (-o OUT \| --in-place) [--ip --mask --gw --dns --ipv6 --ipv6-ll --ipv6-gw --ipv6-dns --port]` | Static addressing for PCs and servers. |
 | `set-wan FILE DEVICE (-o OUT \| --in-place) [--ip --mask --gw --dns]` | Internet (WAN) setup of a home wireless router (Linksys WRT300N). |
-| `decrypt FILE.pka OUT.xml` / `encrypt FILE.xml OUT.pka` | Whole-file conversion. |
+| `decrypt FILE.pka OUT.xml` / `encrypt FILE.xml OUT.pka [--base ORIG.pka]` | Whole-file conversion. With `--base`, only changes inside networks #0/#1 are accepted (used by the agent when it edits settings that no command covers directly in the XML). |
 
 Example:
 

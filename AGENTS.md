@@ -17,7 +17,10 @@ Editing Cisco Packet Tracer .pka/.pkt files directly. `CLAUDE.md` imports this f
 - `show F.pka DEV [--net N] [--startup]` — IOS config as text (defaults to the network PT loads).
 - `ports F.pka DEV` — ports with MAC/IP.
 - `links F.pka [--net N]` — cables / topology (device, port <-> device, port).
-- `decrypt F.pka OUT.xml` / `encrypt F.xml OUT.pka` — whole-file conversion.
+- `decrypt F.pka OUT.xml` / `encrypt F.xml OUT.pka [--base ORIG.pka]` — whole-file conversion. With `--base`,
+  encrypt refuses unless the XML differs from ORIG only inside networks #0/#1 (answer network and ACTIVITY
+  byte-identical) and prints the changed devices. The skill's XML fallback (hand-edit settings no command
+  covers) always encrypts with `--base`.
 - `instructions F.pka [--html]` — activity instructions (ACTIVITY/INSTRUCTIONS/PAGE, CDATA HTML) as Markdown.
 - `set-config F.pka DEV cfg.txt (-o OUT.pka | --in-place) [--nets 0,1] [--startup]` — replace running-config
   (+ startup-config). Same text goes to every listed network.

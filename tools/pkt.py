@@ -18,7 +18,7 @@ Commands (FILE may be .pka/.pkt or an already-decrypted .xml):
   set-wan   FILE DEVICE (-o OUT | --in-place) [--ip A --mask M --gw G --dns D] [--nets 0,1]
                                               Internet (WAN) setup of a home wireless router (WRT300N)
   decrypt   FILE.pka OUT.xml
-  encrypt   FILE.xml OUT.pka
+  encrypt   FILE.xml OUT.pka [--base ORIG.pka]   (--base: allow changes only in networks #0/#1)
 
 Config text: one IOS line per line; write banner delimiters as ^C (stored as byte 0x03).
 Activity files contain 3 networks: #0 saved, #1 initial (loaded for a fresh activity),
@@ -185,6 +185,29 @@ def loaded_net(buf):
         return 0
     r = root_el(buf); c = child(buf, r, "CLEAN_ACTIVITY")
     return 1 if (c is not None and text(buf, c) == "true") else 0
+
+def check_against_base(base, buf):
+    """Hand-edited XML may differ from BASE only inside networks #0 and #1 (saved, initial).
+    Everything else — answer network, ACTIVITY (comparisons, scoring, password) — must be byte-identical."""
+    bn, bact = networks(base); nn, nact = networks(buf)
+    if (bact, len(bn)) != (nact, len(nn)):
+        sys.exit("refusing: network structure differs from --base")
+    editable = range(len(nn) - 1) if nact and len(nn) >= 3 else range(len(nn))
+    def outside(b, nets):
+        parts, pos = [], 0
+        for i in editable:
+            parts.append(b[pos:nets[i].os]); pos = nets[i].oe
+        parts.append(b[pos:])
+        return parts
+    if outside(base, bn) != outside(buf, nn):
+        sys.exit("refusing: edits outside networks #0/#1 (answer network or activity settings changed); "
+                 "output not written")
+    changed = [i for i in editable if base[bn[i].os:bn[i].oe] != buf[nn[i].os:nn[i].oe]]
+    names = []
+    for i in changed:
+        old = {n: base[e.os:e.oe] for n, _t, _m, e in devices(base, bn[i])}
+        names += [n for n, _t, _m, e in devices(buf, nn[i]) if old.get(n) != buf[e.os:e.oe]]
+    print(f"check ok: changed network(s) {changed or 'none'}; devices: {', '.join(sorted(set(names))) or 'none'}")
 
 def splice(buf, start, end, new):
     return buf[:start] + new + buf[end:]
@@ -395,12 +418,16 @@ def main():
     p = sp.add_parser("links"); p.add_argument("file"); p.add_argument("--net", type=int)
     p = sp.add_parser("decrypt"); p.add_argument("file"); p.add_argument("out")
     p = sp.add_parser("encrypt"); p.add_argument("file"); p.add_argument("out")
+    p.add_argument("--base", help="original .pka/.xml; refuse unless only networks #0/#1 differ from it")
     a = ap.parse_args()
 
     if a.cmd == "decrypt":
         open(a.out, "wb").write(load(a.file)); return
     if a.cmd == "encrypt":
-        save(open(a.file, "rb").read(), a.out); return
+        buf = open(a.file, "rb").read()
+        if a.base:
+            check_against_base(load(a.base), buf)
+        save(buf, a.out); print(f"encrypted -> {a.out}"); return
 
     if getattr(a, "in_place", False):
         a.out = a.file
