@@ -1,0 +1,12 @@
+# build output
+tools/pka2xml
+__pycache__/
+
+# Packet Tracer files and decrypted content (Cisco material, lab work) — never commit
+*.pka
+*.pkt
+*.xml
+work/
+lab*/
+zadanie.md
+.DS_Store
