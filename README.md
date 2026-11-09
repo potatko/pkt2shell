@@ -71,7 +71,7 @@ See [CLAUDE.md](CLAUDE.md) for notes aimed at an AI assistant using this tool.
 
 `tools/pka2xml.hpp` and `tools/main.cpp` are derived from
 [mircodz/pka2xml](https://github.com/mircodz/pka2xml) by Mirco De Zorzi, BSD 2-Clause License
-(see [LICENSE.pka2xml](LICENSE.pka2xml)). They were trimmed to file conversion only.
+(see [LICENSE.pka2xml](LICENSE.pka2xml)).
 
 Cisco and Packet Tracer are trademarks of Cisco Systems, Inc. This project is not affiliated with
 Cisco. Use it on your own lab files and follow your course's rules.
