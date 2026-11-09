@@ -7,11 +7,16 @@ Usage:
     python3 install.py --codex      Codex only        (~/.agents/skills/packet-tracer/)
     python3 install.py --uninstall  remove the skill from both locations
 
+    --output new        completed activity is written to "<name> - completed.pka" (default)
+    --output overwrite  completed activity replaces the original file (a backup is kept)
+    If --output is omitted, the mode of an existing installation is kept.
+
 On Windows use `py install.py`. Re-run after `git pull` or after moving this folder.
 """
 import argparse
 import importlib.util
 import os
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -30,6 +35,20 @@ def python_cmd():
     return "python3"
 
 
+MODE_RE = re.compile(r"Default output mode on this computer: \*\*`(new|overwrite)`\*\*")
+
+
+def current_mode():
+    """Output mode of an existing installation, if any."""
+    for t in TARGETS.values():
+        f = t / "SKILL.md"
+        if f.exists():
+            m = MODE_RE.search(f.read_text(encoding="utf-8"))
+            if m:
+                return m.group(1)
+    return None
+
+
 def self_test():
     spec = importlib.util.spec_from_file_location("ptcrypto", REPO / "tools" / "ptcrypto.py")
     ptcrypto = importlib.util.module_from_spec(spec)
@@ -44,6 +63,8 @@ def main():
     ap.add_argument("--claude", action="store_true", help="install for Claude Code only")
     ap.add_argument("--codex", action="store_true", help="install for Codex only")
     ap.add_argument("--uninstall", action="store_true", help="remove the installed skill")
+    ap.add_argument("--output", choices=("new", "overwrite"),
+                    help="default output mode: new file (default) or overwrite the original")
     a = ap.parse_args()
 
     if sys.version_info < (3, 8):
@@ -67,7 +88,8 @@ def main():
     repo = REPO.as_posix()
     pkt = f'{python_cmd()} -I "{repo}/tools/pkt.py"'
     text = (REPO / "skill" / "SKILL.md").read_text(encoding="utf-8")
-    text = text.replace("{{REPO}}", repo).replace("{{PKT}}", pkt)
+    mode = a.output or current_mode() or "new"
+    text = text.replace("{{REPO}}", repo).replace("{{PKT}}", pkt).replace("{{OUTPUT_MODE}}", mode)
 
     for name in chosen:
         TARGETS[name].mkdir(parents=True, exist_ok=True)
@@ -75,6 +97,8 @@ def main():
         print(f"Installed  {name}: {TARGETS[name] / 'SKILL.md'}")
     (REPO / "labs").mkdir(exist_ok=True)
 
+    print(f"Output mode:  {mode}" + ("  (original is backed up, then overwritten)" if mode == "overwrite"
+                                       else '  (result goes to "<name> - completed.pka")'))
     print(f"Tool command: {pkt}")
     print("Start a new agent session in any folder and ask, for example:")
     print('    Complete the Packet Tracer activity "C:/Users/me/Downloads/lab.pka"')

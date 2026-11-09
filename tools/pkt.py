@@ -10,9 +10,9 @@ Commands (FILE may be .pka/.pkt or an already-decrypted .xml):
   ports     FILE DEVICE [--net N]             list ports with MAC / IP
   links     FILE [--net N]                    list cables (topology)
   instructions FILE [--html]                  activity instructions as Markdown
-  set-config FILE DEVICE CFG.txt -o OUT [--nets 0,1] [--startup]
+  set-config FILE DEVICE CFG.txt (-o OUT | --in-place) [--nets 0,1] [--startup]
                                               replace running-config (and startup with --startup)
-  set-host  FILE DEVICE -o OUT [--ip A --mask M --gw G --dns D
+  set-host  FILE DEVICE (-o OUT | --in-place) [--ip A --mask M --gw G --dns D
             --ipv6 ADDR/PREFIX --ipv6-ll LL --ipv6-gw G6 --ipv6-dns D6 --port N] [--nets 0,1]
                                               static addressing for PCs / servers
   decrypt   FILE.pka OUT.xml
@@ -41,13 +41,19 @@ def load(path):
     except Exception as e:
         sys.exit(f"cannot decrypt {path}: {e}")
 
+def _atomic_write(path, data):
+    tmp = path + ".pkt2shell-tmp"
+    with open(tmp, "wb") as f:
+        f.write(data)
+    os.replace(tmp, path)                          # never leaves a half-written file behind
+
 def save(data, path):
     if path.lower().endswith(".xml"):
-        open(path, "wb").write(data); return
+        _atomic_write(path, data); return
     enc = ptcrypto.encrypt_pka(data)
     if ptcrypto.decrypt_pka(enc) != data:          # verify round trip before touching OUT
         sys.exit("round-trip verification failed; output not written")
-    open(path, "wb").write(enc)
+    _atomic_write(path, enc)
 
 # ---------------------------------------------------------------- tiny XML span locator
 
@@ -326,6 +332,11 @@ def html_to_md(h):
 
 # ---------------------------------------------------------------- CLI
 
+def _out_args(p):
+    g = p.add_mutually_exclusive_group(required=True)
+    g.add_argument("-o", "--out", help="write the result to OUT (may equal FILE)")
+    g.add_argument("--in-place", action="store_true", help="overwrite FILE")
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sp = ap.add_subparsers(dest="cmd", required=True)
@@ -334,9 +345,9 @@ def main():
     p.add_argument("--net", type=int); p.add_argument("--startup", action="store_true")
     p = sp.add_parser("ports"); p.add_argument("file"); p.add_argument("device"); p.add_argument("--net", type=int)
     p = sp.add_parser("set-config"); p.add_argument("file"); p.add_argument("device"); p.add_argument("cfg")
-    p.add_argument("-o", "--out", required=True); p.add_argument("--nets"); p.add_argument("--startup", action="store_true")
+    _out_args(p); p.add_argument("--nets"); p.add_argument("--startup", action="store_true")
     p = sp.add_parser("set-host"); p.add_argument("file"); p.add_argument("device")
-    p.add_argument("-o", "--out", required=True); p.add_argument("--nets"); p.add_argument("--port", type=int, default=0)
+    _out_args(p); p.add_argument("--nets"); p.add_argument("--port", type=int, default=0)
     for f in ("ip", "mask", "gw", "dns", "ipv6", "ipv6-ll", "ipv6-gw", "ipv6-dns"):
         p.add_argument("--" + f)
     p = sp.add_parser("instructions"); p.add_argument("file"); p.add_argument("--html", action="store_true")
@@ -350,6 +361,8 @@ def main():
     if a.cmd == "encrypt":
         save(open(a.file, "rb").read(), a.out); return
 
+    if getattr(a, "in_place", False):
+        a.out = a.file
     buf = load(a.file)
 
     if a.cmd == "instructions":

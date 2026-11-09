@@ -51,6 +51,23 @@ Use `--claude` or `--codex` to install for a single agent, and `--uninstall` to 
 The skill references the repository by its absolute path. If the repository is moved, run the
 installer again.
 
+### Output mode
+
+The installer also sets where a completed activity is written:
+
+| Option | Behaviour |
+|---|---|
+| `--output new` (default) | The result is written to a new file, `<original name> - completed.pka`. The original file is not modified. |
+| `--output overwrite` | The original file is backed up to `labs/<activity>/original.pka` in the repository and then overwritten with the result. |
+
+```bash
+python3 install.py --output overwrite
+```
+
+If `--output` is omitted, the mode of the existing installation is retained. The default can be
+overridden for a single request by stating it explicitly, for example *"overwrite the original"* or
+*"write the result to a new file"*.
+
 ## Usage
 
 1. Start a new Claude Code or Codex session. The working directory does not matter.
@@ -59,15 +76,13 @@ installer again.
    > Complete the Packet Tracer activity "C:\Users\student\Downloads\11.5.5 Subnet an IPv4 Network.pka"
 
 3. The agent extracts the instructions and topology, presents an addressing and configuration plan,
-   and writes the result next to the original file as:
-
-   `<original name> - completed.pka`
-
-   The original file is never modified.
-4. Open the new file in Packet Tracer (*File → Open*) and review the completion percentage and
+   and writes the result according to the configured [output mode](#output-mode): either to
+   `<original name> - completed.pka` next to the original, or into the original file after creating
+   a backup. In overwrite mode, close the file in Packet Tracer before starting.
+4. Open the resulting file in Packet Tracer (*File → Open*) and review the completion percentage and
    *Check Results*.
 5. If the activity is not complete, paste the failing *Check Results* items into the session.
-   The agent corrects the configuration and writes a new file.
+   The agent corrects the configuration and updates the result.
 
 ### Post-completion checks
 
@@ -105,8 +120,8 @@ The agent invokes `tools/pkt.py`. It can also be used directly:
 | `links FILE [--net N]` | Cabling between devices (topology). |
 | `show FILE DEVICE [--net N] [--startup]` | IOS running- or startup-configuration as text. |
 | `ports FILE DEVICE [--net N]` | Interfaces with MAC and IP addresses. |
-| `set-config FILE DEVICE CFG -o OUT [--startup] [--nets 0,1]` | Replaces the IOS configuration with the contents of `CFG`. |
-| `set-host FILE DEVICE -o OUT [--ip --mask --gw --dns --ipv6 --ipv6-ll --ipv6-gw --ipv6-dns --port]` | Static addressing for PCs and servers. |
+| `set-config FILE DEVICE CFG (-o OUT \| --in-place) [--startup] [--nets 0,1]` | Replaces the IOS configuration with the contents of `CFG`. |
+| `set-host FILE DEVICE (-o OUT \| --in-place) [--ip --mask --gw --dns --ipv6 --ipv6-ll --ipv6-gw --ipv6-dns --port]` | Static addressing for PCs and servers. |
 | `decrypt FILE.pka OUT.xml` / `encrypt FILE.xml OUT.pka` | Whole-file conversion. |
 
 Example:
@@ -135,7 +150,8 @@ python3 tools/pkt.py set-host result.pka PC1 --ip 192.168.0.10 --mask 255.255.25
 - **Edit safety.** The XML contains raw control characters (for example `0x03` banner
   delimiters), so edits are applied as byte-level replacements of individual elements rather than
   through an XML library. All other content remains byte-identical, and every output file is
-  verified by decrypting it again before it is written.
+  verified by decrypting it again before it is written. Files are written atomically (temporary
+  file, then rename), so an interrupted run cannot leave a partially written activity.
 
 Notes for coding agents are maintained in [AGENTS.md](AGENTS.md). `CLAUDE.md` imports the same
 file. An optional C++ converter derived from pka2xml is located in `cpp/` (`make`, requires

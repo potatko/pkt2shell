@@ -17,9 +17,22 @@ Below, `$PKT` stands for this exact command — write it out in full in every sh
 
 Quote file paths (lab names contain spaces). Each command takes ~2–5 s (pure-Python crypto).
 
+## Output mode
+
+Default output mode on this computer: **`{{OUTPUT_MODE}}`**
+
+- `new` — write the result next to the original as `<original name> - completed.pka`; the original is untouched.
+- `overwrite` — first back up the original to `{{REPO}}/labs/<name>/original.pka`, then write the result
+  into the original file itself (use `--in-place`). Tell the user the backup path.
+
+The user's request overrides the default for that request: "overwrite the original", "prepíš originál",
+"do pôvodného súboru" → `overwrite`; "into a new file", "do nového súboru", "nechaj originál" → `new`.
+If the request is ambiguous, use the default. In `overwrite` mode remind the user to close the file in
+Packet Tracer first (Packet Tracer would otherwise save its own copy over the result).
+
 ## Rules
 
-- Never overwrite the user's file. Write the result next to it as `<original name> - completed.pka`.
+- Never modify the original file except in `overwrite` mode, and never without the backup above.
 - Keep work files (instructions, configs) in `{{REPO}}/labs/<short-lab-name>/` (git-ignored).
   Never commit `.pka`/`.xml`/instructions or lab solutions to the repo.
 - Never look at, show or edit the answer network (the tool refuses it) and never touch COMPARISONS,
@@ -43,14 +56,16 @@ Quote file paths (lab names contain spaces). Each command takes ~2–5 s (pure-P
      before `crypto key generate rsa general-keys modulus <bits>`.
    - Interfaces that must be up: omit `shutdown`. Banner delimiter: `^C`.
    - Local login on VTY = `login local` + `username …`; SSH only = `transport input ssh`.
-4. **Apply** to a copy, chaining on the output file:
-   ```
-   cp "FILE" "OUT"
-   $PKT set-config "OUT" R1 "{{REPO}}/labs/<name>/cfg/R1.txt" --startup -o "OUT"
-   $PKT set-host "OUT" PC1 --ip … --mask … --gw … [--dns …] [--ipv6 A/64 --ipv6-ll … --ipv6-gw …] -o "OUT"
-   ```
+4. **Apply**, chaining every edit on the output file:
+   - `new` mode: `cp "FILE" "OUT"` with OUT = `<original name> - completed.pka`, then edit OUT:
+     ```
+     $PKT set-config "OUT" R1 "{{REPO}}/labs/<name>/cfg/R1.txt" --startup --in-place
+     $PKT set-host "OUT" PC1 --ip … --mask … --gw … [--dns …] [--ipv6 A/64 --ipv6-ll … --ipv6-gw …] --in-place
+     ```
+   - `overwrite` mode: `cp "FILE" "{{REPO}}/labs/<name>/original.pka"` (backup; do not overwrite an
+     existing backup), then run the same commands on "FILE" with `--in-place`.
    Then re-check with `$PKT show "OUT" <dev>` / `$PKT ports "OUT" <host>`.
-5. **Hand over** — tell the user the output path and what to check in Packet Tracer
+5. **Hand over** — tell the user the output path (and the backup path in `overwrite` mode) and what to check in Packet Tracer
    (open it with File → Open): the completion percentage and Check Results; for SSH labs
    `show ip ssh` on the router (if SSH is not enabled, they run `crypto key generate rsa` once in the
    CLI). Ask them to paste failing Check Results items, then fix and re-apply.

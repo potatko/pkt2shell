@@ -19,14 +19,15 @@ Editing Cisco Packet Tracer .pka/.pkt files directly. `CLAUDE.md` imports this f
 - `links F.pka [--net N]` — cables / topology (device, port <-> device, port).
 - `decrypt F.pka OUT.xml` / `encrypt F.xml OUT.pka` — whole-file conversion.
 - `instructions F.pka [--html]` — activity instructions (ACTIVITY/INSTRUCTIONS/PAGE, CDATA HTML) as Markdown.
-- `set-config F.pka DEV cfg.txt -o OUT.pka [--nets 0,1] [--startup]` — replace running-config
+- `set-config F.pka DEV cfg.txt (-o OUT.pka | --in-place) [--nets 0,1] [--startup]` — replace running-config
   (+ startup-config). Same text goes to every listed network.
-- `set-host F.pka DEV -o OUT.pka --ip --mask --gw --dns --ipv6 A/P --ipv6-ll --ipv6-gw --ipv6-dns [--port N]`
+- `set-host F.pka DEV (-o OUT.pka | --in-place) --ip --mask --gw --dns --ipv6 A/P --ipv6-ll --ipv6-gw --ipv6-dns [--port N]`
   — PC/server static addressing.
 - Workflow: `show` → edit full config text → `set-config`. Write a full, consistent config (it replaces,
   not appends). Banner delimiter: write `^C`. Output is verified by an encrypt→decrypt round trip.
-- The tool refuses to show or edit the answer network (last of three). Never write to the user's
-  original file; use a new `-o` path.
+- The tool refuses to show or edit the answer network (last of three). Write to the user's original file
+  only in the skill's `overwrite` output mode (default chosen via `install.py --output`), and only after
+  backing it up to `labs/<name>/original.pka`. Writes are atomic (temp file + rename).
 
 ## XML facts (verified in PT 9.0.1 on "17.8.2 Skills Integration Challenge", file VERSION 8.0.0.0216)
 - Root `PACKETTRACER5_ACTIVITY` holds three `PACKETTRACER5` networks:
