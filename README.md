@@ -4,7 +4,7 @@ Read and edit Cisco Packet Tracer `.pka` / `.pkt` files from the command line, s
 (or an AI assistant such as Claude) can configure a lab directly in the file, without driving the
 Packet Tracer GUI.
 
-Tested with Packet Tracer 9.0.1 on macOS.
+working on Cisco Packet Tracer 9.0.1
 
 ## What it can do
 
