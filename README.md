@@ -9,7 +9,7 @@ working on Cisco Packet Tracer 9.0.1
 ## What it can do
 
 - Decrypt a `.pka`/`.pkt` to XML and encrypt it back (byte-identical round trip).
-- List the networks and devices in a file.
+- List the networks, devices and cabling (topology) in a file.
 - Print a router/switch IOS configuration as plain text.
 - Replace a router/switch running-config (and optionally startup-config) with your own text.
   Packet Tracer replays it when the file is opened, so the configuration is live immediately.
@@ -35,6 +35,7 @@ Python 3.8+ with no extra packages is needed for `tools/pkt.py`.
 ```bash
 python3 tools/pkt.py list lab.pka
 python3 tools/pkt.py instructions lab.pka > instructions.md
+python3 tools/pkt.py links lab.pka            # topology
 python3 tools/pkt.py show lab.pka R1 > r1.txt
 # edit r1.txt (full config, it replaces the existing one; write banner delimiters as ^C)
 python3 tools/pkt.py set-config lab.pka R1 r1.txt --startup -o lab-done.pka

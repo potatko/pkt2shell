@@ -11,6 +11,7 @@
 - `list F.pka` — networks (saved/initial/answer, which one PT loads) and devices.
 - `show F.pka DEV [--net N] [--startup]` — IOS config as text (defaults to the network PT loads).
 - `ports F.pka DEV` — ports with MAC/IP.
+- `links F.pka [--net N]` — cables / topology (device, port <-> device, port).
 - `instructions F.pka [--html]` — activity instructions (ACTIVITY/INSTRUCTIONS/PAGE, CDATA HTML) as Markdown.
 - `set-config F.pka DEV cfg.txt -o OUT.pka [--nets 0,1] [--startup]` — replace running-config
   (+ startup-config). Same text goes to every listed network.

@@ -8,6 +8,8 @@ Commands (FILE may be .pka/.pkt or an already-decrypted .xml):
   list      FILE                              networks + devices
   show      FILE DEVICE [--net N] [--startup] print IOS config
   ports     FILE DEVICE [--net N]             list ports with MAC / IP
+  links     FILE [--net N]                    list cables (topology)
+  instructions FILE [--html]                  activity instructions as Markdown
   set-config FILE DEVICE CFG.txt -o OUT [--nets 0,1] [--startup]
                                               replace running-config (and startup with --startup)
   set-host  FILE DEVICE -o OUT [--ip A --mask M --gw G --dns D
@@ -137,6 +139,22 @@ def devices(buf, net):
         t = child(buf, e, "TYPE")
         model = re.search(rb'model="([^"]*)"', t.attrs) if t is not None else None
         res.append((text(buf, child(buf, e, "NAME")), text(buf, t), model.group(1).decode() if model else "", e))
+    return res
+
+def links(buf, net):
+    """Cables in a network as (dev_a, port_a, dev_b, port_b, cable_type)."""
+    refs = {text(buf, child(buf, e, "SAVE_REF_ID")): n for n, _t, _m, e in devices(buf, net)}
+    n = child(buf, net, "NETWORK"); ls = child(buf, n, "LINKS") if n else None
+    res = []
+    for l in children(buf, ls) if ls else []:
+        if l.tag != "LINK": continue
+        c = child(buf, l, "CABLE")
+        if c is None: continue
+        kids = children(buf, c)
+        ports = [text(buf, k) for k in kids if k.tag == "PORT"]
+        fr = text(buf, child(buf, c, "FROM")); to = text(buf, child(buf, c, "TO"))
+        res.append((refs.get(fr, fr), ports[0] if ports else "", refs.get(to, to),
+                    ports[1] if len(ports) > 1 else "", text(buf, child(buf, l, "TYPE")) or ""))
     return res
 
 def find_engine(buf, net_idx, name):
@@ -327,6 +345,7 @@ def main():
     for f in ("ip", "mask", "gw", "dns", "ipv6", "ipv6-ll", "ipv6-gw", "ipv6-dns"):
         p.add_argument("--" + f)
     p = sp.add_parser("instructions"); p.add_argument("file"); p.add_argument("--html", action="store_true")
+    p = sp.add_parser("links"); p.add_argument("file"); p.add_argument("--net", type=int)
     p = sp.add_parser("decrypt"); p.add_argument("file"); p.add_argument("out")
     p = sp.add_parser("encrypt"); p.add_argument("file"); p.add_argument("out")
     a = ap.parse_args()
@@ -342,6 +361,15 @@ def main():
         pages = instructions_html(buf)
         if not pages: sys.exit("no activity instructions in this file")
         print("\n\n---\n\n".join(pages if a.html else [html_to_md(h) for h in pages])); return
+
+    if a.cmd == "links":
+        net = loaded_net(buf) if a.net is None else a.net
+        nets, activity = networks(buf)
+        if activity and len(nets) >= 3 and net == len(nets) - 1:
+            sys.exit(f"network #{net} is the answer network; not shown")
+        for fa, pa, fb, pb, t in links(buf, nets[net]):
+            print(f"{fa:24} {pa:24} <-> {fb:24} {pb:24} {t}")
+        return
 
     if a.cmd == "list":
         nets, activity = networks(buf)
