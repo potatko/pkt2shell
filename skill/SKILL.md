@@ -45,7 +45,8 @@ Packet Tracer first (Packet Tracer would otherwise save its own copy over the re
    - `$PKT list "FILE"` — devices, and which network PT loads (`<- loaded on open`).
    - `$PKT instructions "FILE" > "{{REPO}}/labs/<name>/zadanie.md"`, then read it fully.
    - `$PKT links "FILE"` — topology (which device/port connects where).
-   - `$PKT show "FILE" <dev>` for every IOS device; `$PKT ports "FILE" <host>` for PCs/servers.
+   - `$PKT show "FILE" <dev>` for every IOS device; `$PKT ports "FILE" <host>` for PCs/servers and
+     home wireless routers (the `WAN (Internet setup)` line shows their Internet IP/mask/gateway/DNS).
 2. **Plan** — addressing (VLSM largest-first when you design it; when the lab leaves the choice open,
    use router = first usable, switch SVI = second usable, PC = last usable) and per-device tasks.
    Show the plan to the user briefly as a table.
@@ -61,9 +62,12 @@ Packet Tracer first (Packet Tracer would otherwise save its own copy over the re
      ```
      $PKT set-config "OUT" R1 "{{REPO}}/labs/<name>/cfg/R1.txt" --startup --in-place
      $PKT set-host "OUT" PC1 --ip … --mask … --gw … [--dns …] [--ipv6 A/64 --ipv6-ll … --ipv6-gw …] --in-place
+     $PKT set-wan "OUT" "Office AP" --ip … --mask … --gw … [--dns …] --in-place   # WRT300N Internet setup
      ```
-   - `overwrite` mode: `cp "FILE" "{{REPO}}/labs/<name>/original.pka"` (backup; do not overwrite an
-     existing backup), then run the same commands on "FILE" with `--in-place`.
+   - `overwrite` mode: `mkdir -p "{{REPO}}/labs/<name>"` and `cp -n "FILE" "{{REPO}}/labs/<name>/original.pka"`
+     (`-n`: never overwrite an existing backup — it holds the true original), then run the same commands
+     on "FILE" with `--in-place`. The file may already contain edits from an earlier run: still check every
+     device against the instructions.
    Then re-check with `$PKT show "OUT" <dev>` / `$PKT ports "OUT" <host>`.
 5. **Hand over** — tell the user the output path (and the backup path in `overwrite` mode) and what to check in Packet Tracer
    (open it with File → Open): the completion percentage and Check Results; for SSH labs
@@ -72,7 +76,8 @@ Packet Tracer first (Packet Tracer would otherwise save its own copy over the re
 
 ## Known limits (see AGENTS.md)
 
-- Verified: IOS running-config replay on open; PC/server addressing via set-host.
+- Verified: IOS running-config replay on open; PC/server addressing via set-host; home wireless router
+  (WRT300N) Internet/WAN setup via set-wan — do it with the tool, do not hand it to the user as a GUI step.
 - Unverified: RSA keys and VLAN databases (exec-time / `ENGINE/VLANS` state), server services
-  (DNS/HTTP/DHCP records), wireless. When a lab needs these, say so and give the user the exact CLI
+  (DNS/HTTP/DHCP records), wireless SSID/security. When a lab needs these, say so and give the user the exact CLI
   commands as a fallback.

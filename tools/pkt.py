@@ -15,6 +15,8 @@ Commands (FILE may be .pka/.pkt or an already-decrypted .xml):
   set-host  FILE DEVICE (-o OUT | --in-place) [--ip A --mask M --gw G --dns D
             --ipv6 ADDR/PREFIX --ipv6-ll LL --ipv6-gw G6 --ipv6-dns D6 --port N] [--nets 0,1]
                                               static addressing for PCs / servers
+  set-wan   FILE DEVICE (-o OUT | --in-place) [--ip A --mask M --gw G --dns D] [--nets 0,1]
+                                              Internet (WAN) setup of a home wireless router (WRT300N)
   decrypt   FILE.pka OUT.xml
   encrypt   FILE.xml OUT.pka
 
@@ -272,6 +274,41 @@ def set_host(buf, net_idx, name, a):
             buf = set_leaf(buf, dc, "SERVER_IPV6", a.ipv6_dns.upper())
     return buf
 
+# ---------------------------------------------------------------- home wireless router (Linksys) WAN
+
+WAN_FIELDS = ("INTERNET_CONNECTION_TYPE", "INTERNET_IP_ADDRESS", "INTERNET_SUBNET_MASK", "DEFAULT_GATEWAY")
+
+def wan_info(buf, e):
+    """Internet (WAN) settings of a home wireless router, or None for other devices."""
+    if child(buf, e, "INTERNET_IP_ADDRESS") is None:
+        return None
+    info = {f: text(buf, child(buf, e, f)) or "" for f in WAN_FIELDS}
+    dc = child(buf, e, "DNS_CLIENT")
+    info["DNS"] = text(buf, child(buf, dc, "SERVER_IP")) or "" if dc is not None else ""
+    return info
+
+def set_wan(buf, net_idx, name, a):
+    eng = lambda: find_engine(buf, net_idx, name)
+    if wan_info(buf, eng()) is None:
+        sys.exit(f"{name} has no Internet (WAN) settings (not a home wireless router such as WRT300N?)")
+    def wan_port():                              # the Internet port is the first wired port
+        ps = host_ports(buf, eng())
+        return ps[0] if ps else None
+    if a.ip is not None:
+        buf = set_leaf(buf, eng(), "INTERNET_IP_ADDRESS", a.ip)
+        if wan_port() is not None: buf = set_leaf(buf, wan_port(), "IP", a.ip)
+    if a.mask is not None:
+        buf = set_leaf(buf, eng(), "INTERNET_SUBNET_MASK", a.mask)
+        if wan_port() is not None: buf = set_leaf(buf, wan_port(), "SUBNET", a.mask)
+    if a.gw is not None:
+        buf = set_leaf(buf, eng(), "DEFAULT_GATEWAY", a.gw)
+    if a.dns is not None:
+        dc = child(buf, eng(), "DNS_CLIENT")
+        if dc is None or child(buf, dc, "SERVER_IP") is None:
+            sys.exit(f"{name}: no DNS_CLIENT/SERVER_IP field")
+        buf = set_leaf(buf, dc, "SERVER_IP", a.dns)
+    return buf
+
 # ---------------------------------------------------------------- activity instructions
 
 def instructions_html(buf):
@@ -350,6 +387,10 @@ def main():
     _out_args(p); p.add_argument("--nets"); p.add_argument("--port", type=int, default=0)
     for f in ("ip", "mask", "gw", "dns", "ipv6", "ipv6-ll", "ipv6-gw", "ipv6-dns"):
         p.add_argument("--" + f)
+    p = sp.add_parser("set-wan"); p.add_argument("file"); p.add_argument("device")
+    _out_args(p); p.add_argument("--nets")
+    for f in ("ip", "mask", "gw", "dns"):
+        p.add_argument("--" + f)
     p = sp.add_parser("instructions"); p.add_argument("file"); p.add_argument("--html", action="store_true")
     p = sp.add_parser("links"); p.add_argument("file"); p.add_argument("--net", type=int)
     p = sp.add_parser("decrypt"); p.add_argument("file"); p.add_argument("out")
@@ -404,6 +445,11 @@ def main():
         for i, p in enumerate(descendants(buf, e, "PORT", stop=("PORT",))):
             g = lambda t: text(buf, child(buf, p, t)) or ""
             print(f"  [{i}] {g('TYPE'):26} mac={g('MACADDRESS'):15} ip={g('IP')}/{g('SUBNET')} gw={g('PORT_GATEWAY')} up={g('POWER')}")
+        w = wan_info(buf, e)
+        if w is not None:
+            print(f"  WAN (Internet setup): ip={w['INTERNET_IP_ADDRESS']}/{w['INTERNET_SUBNET_MASK']} "
+                  f"gw={w['DEFAULT_GATEWAY']} dns={w['DNS']} conn_type={w['INTERNET_CONNECTION_TYPE']}"
+                  f"  (edit with set-wan)")
         return
 
     if a.cmd == "set-config":
@@ -418,6 +464,11 @@ def main():
         for n in editable_nets(buf, a.nets):
             buf = set_host(buf, n, a.device, a)
         save(buf, a.out); print(f"{a.device}: addressing written -> {a.out}"); return
+
+    if a.cmd == "set-wan":
+        for n in editable_nets(buf, a.nets):
+            buf = set_wan(buf, n, a.device, a)
+        save(buf, a.out); print(f"{a.device}: WAN settings written -> {a.out}"); return
 
 if __name__ == "__main__":
     main()

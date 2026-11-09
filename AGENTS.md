@@ -23,11 +23,14 @@ Editing Cisco Packet Tracer .pka/.pkt files directly. `CLAUDE.md` imports this f
   (+ startup-config). Same text goes to every listed network.
 - `set-host F.pka DEV (-o OUT.pka | --in-place) --ip --mask --gw --dns --ipv6 A/P --ipv6-ll --ipv6-gw --ipv6-dns [--port N]`
   — PC/server static addressing.
+- `set-wan F.pka DEV (-o OUT.pka | --in-place) --ip --mask --gw --dns` — Internet (WAN) setup of a home
+  wireless router (Linksys WRT300N). `ports` prints the current WAN line for such devices.
 - Workflow: `show` → edit full config text → `set-config`. Write a full, consistent config (it replaces,
   not appends). Banner delimiter: write `^C`. Output is verified by an encrypt→decrypt round trip.
 - The tool refuses to show or edit the answer network (last of three). Write to the user's original file
   only in the skill's `overwrite` output mode (default chosen via `install.py --output`), and only after
-  backing it up to `labs/<name>/original.pka`. Writes are atomic (temp file + rename).
+  backing it up to `labs/<name>/original.pka` with `cp -n` (never overwrite an existing backup — a second run
+  would otherwise replace the true original with an already-edited file). Writes are atomic (temp file + rename).
 
 ## XML facts (verified in PT 9.0.1 on "17.8.2 Skills Integration Challenge", file VERSION 8.0.0.0216)
 - Root `PACKETTRACER5_ACTIVITY` holds three `PACKETTRACER5` networks:
@@ -40,6 +43,10 @@ Editing Cisco Packet Tracer .pka/.pkt files directly. `CLAUDE.md` imports this f
   editing them alone has no effect for IOS devices.
 - PCs/servers have no RUNNINGCONFIG; their settings live in structured PORT fields (IP, SUBNET, PORT_GATEWAY,
   PORT_DNS, IPV6_*) plus ENGINE GATEWAY/GATEWAYV6/DNS_CLIENT. Verified in PT 9.0.1: `set-host` edits are honoured.
+- Home wireless routers (WRT300N): no IOS config; Internet setup lives in ENGINE `INTERNET_IP_ADDRESS`,
+  `INTERNET_SUBNET_MASK`, `DEFAULT_GATEWAY`, `DNS_CLIENT/SERVER_IP` (+ the Internet port = first wired PORT).
+  Verified in PT 9.0.1 ("Troubleshooting" activity): editing these is honoured and graded. `set-wan` does not
+  touch `INTERNET_CONNECTION_TYPE` (value meaning unclear: static WAN seen with both 0 and 2).
 - Unverified: exec-time state that is not in running-config text — RSA keys (`crypto key generate rsa`,
   needed for SSH) and VLANs (stored in ENGINE/VLANS on switches). These may need to be done in the PT CLI.
 - Text contains raw control chars (e.g. `^C` = 0x03 in banners) → invalid XML 1.0. Parse only for reading

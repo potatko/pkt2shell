@@ -96,7 +96,8 @@ overridden for a single request by stating it explicitly, for example *"overwrit
 - **Addressing schemes left to the student:** the agent uses a conventional assignment (router:
   first usable address; switch SVI: second; host: last). If the activity expects different values,
   the affected items appear in *Check Results*.
-- **Not yet validated:** VLAN databases, server services (DNS, HTTP, DHCP), and wireless settings.
+- **Not yet validated:** VLAN databases, server services (DNS, HTTP, DHCP), and wireless SSID/security
+  settings (the Internet/WAN setup of WRT300N routers is supported via `set-wan`).
   For activities that require them, the agent also provides the equivalent CLI commands.
 
 ### Updating
@@ -122,6 +123,7 @@ The agent invokes `tools/pkt.py`. It can also be used directly:
 | `ports FILE DEVICE [--net N]` | Interfaces with MAC and IP addresses. |
 | `set-config FILE DEVICE CFG (-o OUT \| --in-place) [--startup] [--nets 0,1]` | Replaces the IOS configuration with the contents of `CFG`. |
 | `set-host FILE DEVICE (-o OUT \| --in-place) [--ip --mask --gw --dns --ipv6 --ipv6-ll --ipv6-gw --ipv6-dns --port]` | Static addressing for PCs and servers. |
+| `set-wan FILE DEVICE (-o OUT \| --in-place) [--ip --mask --gw --dns]` | Internet (WAN) setup of a home wireless router (Linksys WRT300N). |
 | `decrypt FILE.pka OUT.xml` / `encrypt FILE.xml OUT.pka` | Whole-file conversion. |
 
 Example:
