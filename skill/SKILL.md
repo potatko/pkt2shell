@@ -61,10 +61,13 @@ Packet Tracer first (Packet Tracer would otherwise save its own copy over the re
 3. **Copy the sample solution:** `$PKT copy-answer "OUT" --whole-network --in-place`
    — networks #0 (saved) and #1 (initial) become exact copies of the answer network: configs,
    startup-configs, structured state (IPv6 lists, VLANs, RSA keys, server services, wireless), cabling,
-   renamed or replaced devices. Nothing outside the networks changes.
+   renamed or replaced devices. It also switches off the activity's initial setup (`LOAD_INIT_TREE`), which
+   would otherwise make Packet Tracer write the planted faults back over the solution on open. Nothing
+   else outside the networks changes.
 4. **Verify offline:** `$PKT verify "OUT"` must end with
    `OK: every network PT can load is identical to the sample solution -> 100 % expected`.
-   Anything else → repeat step 3 and verify again; never hand over a file that fails `verify`.
+   Anything else (differing devices, or `initial setup: LOAD_INIT_TREE=true`) → repeat step 3 and verify
+   again; never hand over a file that fails `verify`.
 5. **Hand over** — first line: **"✅ 100 % — the activity is identical to its sample solution (`verify` OK)"**.
    Then: output path (and backup path in `overwrite` mode); what was wrong and is now fixed, per device
    (from step 1); the message Packet Tracer will show (`checklist.txt`, e.g. "Congratulations on

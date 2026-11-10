@@ -25,8 +25,9 @@ Editing Cisco Packet Tracer .pka/.pkt files directly. `CLAUDE.md` imports this f
   `save-ref-id:` references are translated), the LINKS (cabling), or the whole network (`--whole-network`,
   what the skill uses for every activity). Copies are verbatim — startup-config can be graded too.
 - `verify F.pka [--nets 0,1]` — offline check that #0/#1 equal the answer network: every answer device has an
-  identical ENGINE (refs translated, `*MEM_ADDR`/`DEV_ADDR` runtime pointers ignored) and identical LINKS.
-  Exit 1 with the differing devices otherwise. On the original file it lists what the activity wants fixed.
+  identical ENGINE (refs translated, `*MEM_ADDR`/`DEV_ADDR` runtime pointers ignored) and identical LINKS,
+  and `LOAD_INIT_TREE` is not true. Exit 1 with the problems otherwise. On the original file it lists what
+  the activity wants fixed. A file saved by PT fails it (PT re-serializes runtime fields) — just re-copy.
 - `backup F DEST [--force]` — copy unless DEST exists. `ports` also prints host DNS.
 - `checklist` ends with the root `OVERALL_COMPLETE_FEEDBACK` / `OVERALL_INCOMPLETE_FEEDBACK` texts — what
   Check Results shows when the activity is (in)complete. The user does not want the agent to open Packet
@@ -84,5 +85,11 @@ Editing Cisco Packet Tracer .pka/.pkt files directly. `CLAUDE.md` imports this f
   finished with `copy-answer --whole-network` + `verify`, not with set-config. The answer's startup-config
   may look unrelated (that file: an OSPF template on R1) but is copied as is: COMPARISONS can grade
   "Startup Config".
+- Initial setup: root `INITIALSETUP` is a tree like COMPARISONS (checked leaves = values) plus
+  `LOAD_INIT_TREE`. When true, PT writes those values into the network **on open** — the planted faults
+  (seen in "pks25_troubleshooting_10_v2": PC masks/IPs/DNS, S1 hostname, WPA pass phrase, CE IPv6), so a
+  network identical to the answer still scored incomplete. PT saves the file with false after the first open.
+  `copy-answer` sets it to false (the one allowed change outside the networks; `encrypt --base` accepts
+  only that), `verify` fails while it is true.
 - Unverified in PT: that every setting copied by `copy-answer` is scored (file validity and untouched
   answer/activity data are verified with `encrypt --base`).

@@ -13,7 +13,8 @@ Commands (FILE may be .pka/.pkt or an already-decrypted .xml):
   checklist FILE [--dev NAME]                 graded items with expected values (answer key) and the
                                               complete / incomplete messages PT shows
   verify    FILE [--nets 0,1]                 check offline that networks #0/#1 equal the answer network
-                                              (exit 1 and list differing devices / cabling otherwise)
+                                              and that PT will not re-apply the initial setup on open
+                                              (exit 1 and list the problems otherwise)
   copy-answer FILE [DEVICE ...] (-o OUT | --in-place) [--all] [--links] [--whole-network] [--nets 0,1]
                                               copy devices / cabling / whole network from the answer
                                               network (sample solution) into networks #0/#1
@@ -33,6 +34,7 @@ Config text: one IOS line per line; write banner delimiters as ^C (stored as byt
 Activity files contain 3 networks: #0 saved, #1 initial (loaded for a fresh activity),
 #2 answer network (sample solution). Edits default to #0 and #1; #2 is only read (--answer,
 checklist, copy-answer) and never modified, nor are COMPARISONS / scoring / activity settings.
+The only change outside the networks: copy-answer sets INITIALSETUP/LOAD_INIT_TREE to false.
 """
 import argparse, importlib.util, os, re, sys
 
@@ -214,7 +216,9 @@ def check_against_base(base, buf):
             parts.append(b[pos:nets[i].os]); pos = nets[i].oe
         parts.append(b[pos:])
         return parts
-    if outside(base, bn) != outside(buf, nn):
+    lit = lambda parts: [x.replace(b"<LOAD_INIT_TREE>true</LOAD_INIT_TREE>", b"<LOAD_INIT_TREE>false</LOAD_INIT_TREE>")
+                         for x in parts]                # disabling the initial-setup replay is allowed
+    if lit(outside(base, bn)) != lit(outside(buf, nn)):
         sys.exit("refusing: edits outside networks #0/#1 (answer network or activity settings changed); "
                  "output not written")
     changed = [i for i in editable if base[bn[i].os:bn[i].oe] != buf[nn[i].os:nn[i].oe]]
@@ -369,10 +373,11 @@ def set_wan(buf, net_idx, name, a):
 
 # ---------------------------------------------------------------- answer key (read-only) and copying from it
 
-def checklist(buf):
+def checklist(buf, tree="COMPARISONS"):
     """Graded items: checked leaves (checkType="2") of the activity's COMPARISONS tree,
-    as (path, expected value, points, component). Paths start below the root "Network" node."""
-    cmp_ = child(buf, root_el(buf), "COMPARISONS")
+    as (path, expected value, points, component). Paths start below the root "Network" node.
+    With tree="INITIALSETUP": the values Packet Tracer writes into the network on open."""
+    cmp_ = child(buf, root_el(buf), tree)
     out = []
     def walk(el, path):
         for n in children(buf, el):
@@ -399,6 +404,20 @@ def overall_feedback(buf):
         el = child(buf, r, tag)
         return html_to_md(unescape(buf[el.is_:el.ie]).decode("utf-8", "replace")).strip() if el is not None else ""
     return get("OVERALL_COMPLETE_FEEDBACK"), get("OVERALL_INCOMPLETE_FEEDBACK")
+
+def init_tree_active(buf):
+    """True when Packet Tracer re-applies the INITIALSETUP values (the planted faults) on open."""
+    ins = child(buf, root_el(buf), "INITIALSETUP")
+    lt = child(buf, ins, "LOAD_INIT_TREE") if ins is not None else None
+    return lt is not None and text(buf, lt) == "true"
+
+def disable_init_tree(buf):
+    """Set INITIALSETUP/LOAD_INIT_TREE to false — the state Packet Tracer itself saves after the first
+    open — so the planted initial values are not written over the copied solution on open."""
+    if not init_tree_active(buf):
+        return buf
+    lt = child(buf, child(buf, root_el(buf), "INITIALSETUP"), "LOAD_INIT_TREE")
+    return splice(buf, lt.is_, lt.ie, b"false")
 
 def _norm(s):
     return re.sub(r"[\s_\-]+", "", (s or "").lower())
@@ -728,8 +747,14 @@ def main():
             print(f"network #{n}: " + ("identical to the sample solution" if not probs else f"{len(probs)} difference(s)"))
             for x in probs: print(f"  - {x}")
             bad |= bool(probs)
+        if init_tree_active(buf):
+            items = checklist(buf, "INITIALSETUP")
+            print(f"initial setup: LOAD_INIT_TREE=true — Packet Tracer writes {len(items)} value(s) into the network "
+                  f"on open, over the solution:")
+            for path, val, _p, _c in items: print(f"  - {' > '.join(path)} = {val!r}")
+            bad = True
         if bad:
-            sys.exit("NOT identical to the sample solution: fix with copy-answer (see above)")
+            sys.exit("NOT ready for 100 %: run copy-answer --whole-network (see above)")
         print("OK: every network PT can load is identical to the sample solution -> 100 % expected")
         return
 
@@ -742,6 +767,11 @@ def main():
                 buf = copy_whole_network(buf, n); print(f"  #{n}: replaced with the answer network")
             else:
                 buf = copy_answer(buf, n, "all" if a.all else a.devices, a.links)
+        if init_tree_active(buf):
+            k = len(checklist(buf, "INITIALSETUP"))
+            buf = disable_init_tree(buf)
+            print(f"  initial setup disabled (LOAD_INIT_TREE=false): Packet Tracer would otherwise write {k} "
+                  f"planted value(s) over the solution on open")
         save(buf, a.out); print(f"answer copied -> {a.out}"); return
 
     if a.cmd == "set-config":
