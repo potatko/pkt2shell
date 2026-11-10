@@ -128,7 +128,7 @@ The agent invokes `tools/pkt.py`. It can also be used directly:
 | `show FILE DEVICE [--net N \| --answer] [--startup]` | IOS running- or startup-configuration as text. `--answer` reads the sample solution. |
 | `ports FILE DEVICE [--net N \| --answer]` | Interfaces with MAC and IP addresses. |
 | `checklist FILE [--dev NAME]` | Graded items of the activity with expected values and points (answer key), plus the messages Packet Tracer shows when the activity is complete or incomplete. |
-| `verify FILE` | Offline check that the networks Packet Tracer loads are identical to the sample solution (exit code 1 and a list of differing devices otherwise). |
+| `verify FILE` | Offline check of every graded item against the value Packet Tracer grades (exit code 0 = 100 %, 1 = wrong items listed, 2 = only items that Packet Tracer decides at runtime). |
 | `copy-answer FILE [DEVICE ...] (-o OUT \| --in-place) [--all] [--links] [--whole-network]` | Copies devices, cabling or the whole network from the sample solution into networks #0/#1. |
 | `set-config FILE DEVICE CFG (-o OUT \| --in-place) [--startup] [--nets 0,1]` | Replaces the IOS configuration with the contents of `CFG`. |
 | `set-host FILE DEVICE (-o OUT \| --in-place) [--ip --mask --gw --dns --ipv6 --ipv6-ll --ipv6-gw --ipv6-dns --port]` | Static addressing for PCs and servers. |

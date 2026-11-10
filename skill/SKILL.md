@@ -39,7 +39,8 @@ Packet Tracer first (Packet Tracer would otherwise save its own copy over the re
 - Keep work files (instructions, checklist) in `{{REPO}}/labs/<short-lab-name>/` (git-ignored).
   Never commit `.pka`/`.xml`/instructions or lab solutions to the repo.
 - **Activities (`.pka` with an answer network) always end at 100 %:** the networks Packet Tracer loads
-  are made identical to the sample solution (answer network #2) and checked offline with `$PKT verify`.
+  are made copies of the sample solution (answer network #2), every graded item is then set to the value
+  Packet Tracer grades against, and `$PKT verify` checks all graded items offline.
   Never open Packet Tracer or other GUI apps to check the result — `verify` is the check.
 - The answer network and the graded checklist are **read-only references**; never edit them, nor
   COMPARISONS, scoring, locking or the activity password (the tool and `encrypt --base` refuse it).
@@ -49,11 +50,12 @@ Packet Tracer first (Packet Tracer would otherwise save its own copy over the re
 1. **Inspect**
    - `$PKT list "FILE"` — devices, and which network PT loads.
    - `$PKT instructions "FILE"`, save to `{{REPO}}/labs/<name>/zadanie.md` (Write tool), read it.
-   - `$PKT checklist "FILE"`, save to `{{REPO}}/labs/<name>/checklist.txt` — graded items, expected values,
-     points, and the message PT shows when complete.
-   - `$PKT verify "FILE"` — which devices / cabling differ from the sample solution now. For each of them,
-     compare `$PKT show "FILE" <dev>` with `$PKT show "FILE" <dev> --answer` (`ports` for PCs/servers,
-     `links` / `links --answer` for cabling) to explain in the hand-over what was wrong.
+   - `$PKT checklist "FILE"`, save to `{{REPO}}/labs/<name>/checklist.txt` — graded items with the value
+     Packet Tracer grades against, points, and the message PT shows when complete. Lines marked
+     `<- graded value … the answer network has …` are graded against a different value than the sample
+     solution contains (the author's override) — the sample solution alone will NOT score them.
+   - `$PKT verify "FILE"` — every graded item that is wrong now (current vs. graded value): this is the list
+     of faults for the hand-over.
 2. **Output file**
    - `new` mode: `$PKT backup "FILE" "OUT" --force` with OUT = `<original name> - completed.pka`.
    - `overwrite` mode: `$PKT backup "FILE" "{{REPO}}/labs/<name>/original.pka"` (never replaces an existing
@@ -64,11 +66,19 @@ Packet Tracer first (Packet Tracer would otherwise save its own copy over the re
    renamed or replaced devices. It also switches off the activity's initial setup (`LOAD_INIT_TREE`), which
    would otherwise make Packet Tracer write the planted faults back over the solution on open. Nothing
    else outside the networks changes.
-4. **Verify offline:** `$PKT verify "OUT"` must end with
-   `OK: every network PT can load is identical to the sample solution -> 100 % expected`.
-   Anything else (differing devices, or `initial setup: LOAD_INIT_TREE=true`) → repeat step 3 and verify
-   again; never hand over a file that fails `verify`.
-5. **Hand over** — first line: **"✅ 100 % — the activity is identical to its sample solution (`verify` OK)"**.
+4. **Verify offline:** `$PKT verify "OUT"`. It reads every graded item from OUT the way Packet Tracer will
+   see it (IOS: running-config text; PCs/servers: structured fields) and compares it with the graded value.
+   - `WRONG … expected 'X' (graded value; the answer network has 'Y')` — set X yourself:
+     IOS device → `$PKT show "OUT" <dev>` into `{{REPO}}/labs/<name>/cfg/<dev>.txt`, edit the line
+     (e.g. `hostname X`, `ip address …`, `ip route …`), `$PKT set-config "OUT" <dev> <cfg> --in-place`;
+     PC/server → `$PKT set-host "OUT" <dev> --ip/--mask/--gw/--dns … --in-place`;
+     home wireless router WAN → `set-wan`; anything else → XML fallback.
+   - Other `WRONG` lines or `initial setup: LOAD_INIT_TREE=true` → run step 3 again.
+   - Repeat until `verify` ends with `OK: every graded item has its graded value -> 100 % expected` (exit 0).
+     Exit 2 = all checkable items OK, the `UNSURE` lines (live tests, variables `[[…]]`) are decided by
+     Packet Tracer — hand over with those listed. Never hand over a file with `WRONG` lines.
+5. **Hand over** — first line: **"✅ 100 % — every graded item has its graded value (`verify` OK)"**
+   (or **"⚠️ 100 % of checkable items — Packet Tracer decides: …"** with the UNSURE items, exit 2).
    Then: output path (and backup path in `overwrite` mode); what was wrong and is now fixed, per device
    (from step 1); the message Packet Tracer will show (`checklist.txt`, e.g. "Congratulations on
    completing this activity!"). Remind the user: close the file in Packet Tracer **without saving**

@@ -375,7 +375,9 @@ def set_wan(buf, net_idx, name, a):
 
 def checklist(buf, tree="COMPARISONS"):
     """Graded items: checked leaves (checkType="2") of the activity's COMPARISONS tree,
-    as (path, expected value, points, component). Paths start below the root "Network" node.
+    as (path, answer value, points, component, variable expression). Paths start below "Network".
+    A non-empty variable expression (attribute variableName) is what Packet Tracer grades against —
+    it can differ from the answer network's value; see expected().
     With tree="INITIALSETUP": the values Packet Tracer writes into the network on open."""
     cmp_ = child(buf, root_el(buf), tree)
     out = []
@@ -390,9 +392,11 @@ def checklist(buf, tree="COMPARISONS"):
             ct = re.search(rb'checkType="(\d+)"', nm.attrs)
             if ct and ct.group(1) == b"2":
                 v = re.search(rb'nodeValue="([^"]*)"', nm.attrs)
+                var = re.search(rb'variableName="([^"]*)"', nm.attrs)
                 out.append((p[1:] if p[0] == "Network" else p,
                             unescape(v.group(1)).decode("utf-8", "replace") if v else "",
-                            text(buf, child(buf, n, "POINTS")) or "", text(buf, child(buf, n, "COMPONENTS")) or ""))
+                            text(buf, child(buf, n, "POINTS")) or "", text(buf, child(buf, n, "COMPONENTS")) or "",
+                            unescape(var.group(1)).decode("utf-8", "replace") if var else ""))
     if cmp_ is not None:
         walk(cmp_, [])
     return out
@@ -510,31 +514,164 @@ def copy_answer(buf, n, want, do_links):
 
 NOISE = re.compile(rb"<([A-Z_]*MEM_ADDR|DEV_ADDR)>[^<]*</\1>")   # runtime pointers, differ per save
 
+def variable_names(buf):
+    vm = child(buf, root_el(buf), "VARIABLE_MANAGER")
+    return set(re.findall(r"<NAME[^>]*>([^<]+)</NAME>", buf[vm.os:vm.oe].decode("utf-8", "replace"))) if vm is not None else set()
+
+def expected(val, var, varnames=()):
+    """(kind, expected) of a graded item. Packet Tracer grades against the variable expression when one
+    is set (seen: S1 'Host Name' answer value 'S1429…' but variableName 'S1' -> 'S1429…' scored wrong):
+    'value' = literal, 'regex' = {{RegEx:…}}, 'variable' = [[Var]] or a VARIABLE_MANAGER name."""
+    if not var or var == val:
+        return "value", val
+    if var.startswith("{{RegEx:") and var.endswith("}}"):
+        return "regex", var[8:-2]
+    if "[[" in var or var in varnames:
+        return "variable", var
+    return "value", var
+
+NOSUP = object()          # value not readable offline
+
+def _iface_lines(lines, ifname):
+    out, on = [], False
+    for l in lines:
+        if l.startswith("interface "):
+            on = l[10:].strip().lower() == ifname.lower(); continue
+        if on:
+            if l.startswith(" "): out.append(l.strip())
+            else: on = False
+    return out
+
+def _host_port(buf, e, ifname):
+    m = re.match(r"([A-Za-z]+?)(\d+)$", ifname.replace(" ", ""))
+    if not m: return None
+    fam, idx = m.group(1).lower(), int(m.group(2))
+    ps = [p for p in descendants(buf, e, "PORT", stop=("PORT",)) if fam in (text(buf, child(buf, p, "TYPE")) or "").lower()]
+    return ps[idx] if idx < len(ps) else None
+
+def _nth(label):
+    """0-based index from a label like 'IPv6 Address 2' (trailing number; default 1)."""
+    m = re.search(r"(\d+)\s*$", label)
+    return int(m.group(1)) - 1 if m else 0
+
+def _mask_len(m):
+    try: return str(sum(bin(int(x)).count("1") for x in m.split(".")))
+    except ValueError: return m
+
+def current_value(buf, e, rest):
+    """Current value of a graded item (path below the device) in a device ENGINE, read the way PT
+    will see it after open (IOS: from running-config text; hosts: structured fields). NOSUP if unknown."""
+    g = lambda el, tag: (text(buf, child(buf, el, tag)) or "") if el is not None else ""
+    wan = wan_info(buf, e)
+    if wan is not None:                          # home wireless router (WRT300N): WAN fields only
+        if rest == ["Ports", "Internet", "IP Address"]: return wan["INTERNET_IP_ADDRESS"]
+        if rest == ["Ports", "Internet", "Subnet Mask"]: return wan["INTERNET_SUBNET_MASK"]
+        if rest == ["Default Gateway"]: return wan["DEFAULT_GATEWAY"]
+        if rest == ["DNS Server IP"]: return wan["DNS"]
+        return NOSUP
+    run = child(buf, e, "RUNNINGCONFIG")
+    if run is not None:                          # IOS: what the replayed config sets
+        lines = cfg_lines(buf, run)
+        first = lambda pfx: next((l[len(pfx):].strip() for l in lines if l.startswith(pfx)), "")
+        if rest == ["Host Name"]: return first("hostname ")
+        if rest == ["Banner MOTD"]:
+            b = first("banner motd ")
+            return b[1:-1] if len(b) >= 2 and b[0] == b[-1] else b
+        if rest == ["Routesv6", "IPv6 Unicast Routing"]: return "1" if "ipv6 unicast-routing" in lines else "0"
+        if rest == ["Service Password Encryption"]: return "1" if "service password-encryption" in lines else "0"
+        if rest == ["Default Gateway"]: return first("ip default-gateway ")
+        if rest[:2] == ["Routes", "Static Routes"] and len(rest) == 3:
+            return ["-".join([x[0], _mask_len(x[1]), x[2]]).upper()
+                    for x in (l.split()[2:5] for l in lines if l.startswith("ip route ")) if len(x) == 3]
+        if rest[:2] == ["Routesv6", "Static Routes"] and len(rest) == 3:
+            return ["-".join([x[0].split("/")[0], x[0].split("/")[1], x[1]]).upper()
+                    for x in (l.split()[2:4] for l in lines if l.startswith("ipv6 route ")) if len(x) == 2 and "/" in x[0]]
+        if len(rest) >= 3 and rest[0] == "Ports":
+            il = _iface_lines(lines, rest[1])
+            v4 = next((l.split()[2:4] for l in il if l.startswith("ip address ") and "secondary" not in l
+                       and len(l.split()) >= 4), ["", ""])
+            if rest[2:] == ["IP Address"]: return v4[0]
+            if rest[2:] == ["Subnet Mask"]: return v4[1]
+            if rest[2:] == ["Link Local"]:
+                return next((l.split()[2] for l in il if l.startswith("ipv6 address ") and l.endswith("link-local")), "")
+            if rest[2].lower() == "ipv6 addresses" and len(rest) == 5:
+                v6 = [l.split()[2] for l in il if l.startswith("ipv6 address ") and "/" in l and "link-local" not in l]
+                k = _nth(rest[3])
+                if k >= len(v6): return ""
+                a, _, pl = v6[k].partition("/")
+                return a if rest[4] == "IP Address" else pl if rest[4] in ("Prefix Length", "Prefix") else NOSUP
+        return NOSUP
+    # PCs, servers, laptops: structured fields
+    if rest == ["Default Gateway"]: return g(e, "GATEWAY")
+    if rest == ["Default Gateway IPv6"]: return g(e, "GATEWAYV6")
+    if rest == ["DNS Server IP"]: return g(child(buf, e, "DNS_CLIENT"), "SERVER_IP")
+    if len(rest) >= 3 and rest[0] == "Ports":
+        p = _host_port(buf, e, rest[1])
+        if p is None: return NOSUP
+        if rest[2:] == ["IP Address"]: return g(p, "IP")
+        if rest[2:] == ["Subnet Mask"]: return g(p, "SUBNET")
+        if rest[2:] == ["DHCP client enable"]: return "1" if g(p, "PORT_DHCP_ENABLE") == "true" else "0"
+        if rest[2].lower() == "ipv6 addresses" and len(rest) == 5:
+            v6 = child(buf, p, "IPV6_ADDRESSES")
+            lst = [(g(a, "ADDRESS"), g(a, "PREFIX")) for a in children(buf, v6)] if v6 is not None else []
+            k = _nth(rest[3])
+            if k >= len(lst): return ""
+            return lst[k][0] if rest[4] == "IP Address" else lst[k][1] if rest[4] in ("Prefix Length", "Prefix") else NOSUP
+    return NOSUP
+
+def _matches(kind, exp, cur):
+    if isinstance(cur, list):                    # static routes: the expected route must be configured
+        return "-".join(exp.split("-")[:3]).upper() in cur
+    if kind == "regex":
+        try: return re.search(exp, cur) is not None
+        except re.error: return None
+    return cur.strip().upper() == exp.strip().upper()
+
 def verify(buf, n):
-    """Differences between network #n and the answer network that can affect grading: every answer
-    device must exist in #n with an identical ENGINE (device references translated, runtime pointers
-    ignored) and the cabling must be identical. Returns a list of problems (empty = identical)."""
+    """Check every graded item of network #n against what Packet Tracer grades. Returns (wrong, unsure):
+    wrong = items that will score 0 (+ init-tree / cabling problems), unsure = items not checkable offline
+    (variables, runtime state on a device that differs from the answer)."""
     ai = answer_idx(buf)
     nets, _ = networks(buf)
-    if buf[nets[n].os:nets[n].oe] == buf[nets[ai].os:nets[ai].oe]:
-        return []
+    identical = buf[nets[n].os:nets[n].oe] == buf[nets[ai].os:nets[ai].oe]
     pairs = match_devices(buf, nets[ai], nets[n])
     sref, dref = _refs(buf, nets[ai]), _refs(buf, nets[n])
     rmap = {sref[a]: dref[b] for a, b in pairs.items() if sref.get(a) and dref.get(b)}
     eng = {x: e for x, _t, _m, e in devices(buf, nets[n])}
-    probs = []
-    for a, _t, _m, se in devices(buf, nets[ai]):
-        if a not in pairs:
-            probs.append(f"{a}: missing (or a different model) in network #{n}"); continue
-        de = eng[pairs[a]]
-        x = NOISE.sub(b"", translate_refs(buf[se.os:se.oe], rmap)[0])
-        if x != NOISE.sub(b"", buf[de.os:de.oe]):
-            probs.append(f"{pairs[a]}: differs from the answer" + (f" ({a!r})" if a != pairs[a] else ""))
+    aeng = {x: e for x, _t, _m, e in devices(buf, nets[ai])}
+    same = {}
+    def same_as_answer(a):
+        if a not in same:
+            se, de = aeng[a], eng[pairs[a]]
+            same[a] = identical or NOISE.sub(b"", translate_refs(buf[se.os:se.oe], rmap)[0]) == NOISE.sub(b"", buf[de.os:de.oe])
+        return same[a]
+    names = variable_names(buf)
+    wrong, unsure = [], []
+    for path, val, pts, _c, var in checklist(buf):
+        kind, exp = expected(val, var, names)
+        dev, rest, label = path[0], path[1:], " > ".join(path)
+        if dev not in aeng:                       # ConnectivityTests etc.: evaluated live by PT
+            unsure.append(f"{label} [{pts} pt]: evaluated live in Packet Tracer"); continue
+        if dev not in pairs:
+            wrong.append(f"{label} [{pts} pt]: device missing in network #{n}"); continue
+        if kind == "value" and exp == val and same_as_answer(dev):
+            continue          # graded value = the answer's own (possibly runtime, e.g. DHCP) value; device identical
+        cur = current_value(buf, eng[pairs[dev]], rest)
+        if cur is NOSUP or kind == "variable":
+            unsure.append(f"{label} [{pts} pt]: expected {exp!r}" + (" (variable)" if kind == "variable" else "")
+                          + " — not checkable offline"); continue
+        ok = _matches(kind, exp, cur)
+        if ok is None:
+            unsure.append(f"{label} [{pts} pt]: expected {exp!r} — not checkable offline")
+        elif not ok:
+            shown = "routes " + ", ".join(cur) if isinstance(cur, list) else repr(cur)
+            wrong.append(f"{label} [{pts} pt]: is {shown}, expected {exp!r}" + ("" if exp == val else
+                         f" (graded value; the answer network has {val!r})"))
     sl = child(buf, child(buf, nets[ai], "NETWORK"), "LINKS"); dl = child(buf, child(buf, nets[n], "NETWORK"), "LINKS")
-    if (sl is None) != (dl is None) or (sl is not None and
-            NOISE.sub(b"", translate_refs(buf[sl.os:sl.oe], rmap)[0]) != NOISE.sub(b"", buf[dl.os:dl.oe])):
-        probs.append("cabling (LINKS) differs from the answer")
-    return probs
+    if not identical and ((sl is None) != (dl is None) or (sl is not None and
+            NOISE.sub(b"", translate_refs(buf[sl.os:sl.oe], rmap)[0]) != NOISE.sub(b"", buf[dl.os:dl.oe]))):
+        wrong.append("cabling (LINKS) differs from the answer — copy-answer --links")
+    return wrong, unsure
 
 def copy_whole_network(buf, n):
     ai = answer_idx(buf)
@@ -721,8 +858,11 @@ def main():
         items = checklist(buf)
         if not items: sys.exit("no graded items (not an activity file, or nothing is checked)")
         groups = {}
-        for path, val, pts, comp in items:
-            groups.setdefault(path[0], []).append((path[1:], val, pts, comp))
+        names = variable_names(buf)
+        for path, val, pts, comp, var in items:
+            kind, exp = expected(val, var, names)
+            note = "" if exp == val else (f"   <- graded value ({kind}); the answer network has {val!r}")
+            groups.setdefault(path[0], []).append((path[1:], exp, pts, comp + note))
         total = 0
         for g, rows in groups.items():
             if a.dev and g != a.dev: continue
@@ -741,21 +881,27 @@ def main():
 
     if a.cmd == "verify":
         if answer_idx(buf) is None: sys.exit("no answer network (not an activity file)")
-        bad = False
+        bad = unsure_any = False
+        total = len(checklist(buf))
         for n in editable_nets(buf, a.nets):
-            probs = verify(buf, n)
-            print(f"network #{n}: " + ("identical to the sample solution" if not probs else f"{len(probs)} difference(s)"))
-            for x in probs: print(f"  - {x}")
-            bad |= bool(probs)
+            wrong, unsure = verify(buf, n)
+            print(f"network #{n}: {total} graded items — {len(wrong)} wrong, {len(unsure)} not checkable offline")
+            for x in wrong: print(f"  WRONG   {x}")
+            for x in unsure: print(f"  UNSURE  {x}")
+            bad |= bool(wrong); unsure_any |= bool(unsure)
         if init_tree_active(buf):
             items = checklist(buf, "INITIALSETUP")
             print(f"initial setup: LOAD_INIT_TREE=true — Packet Tracer writes {len(items)} value(s) into the network "
                   f"on open, over the solution:")
-            for path, val, _p, _c in items: print(f"  - {' > '.join(path)} = {val!r}")
+            for it in items: print(f"  - {' > '.join(it[0])} = {it[1]!r}")
             bad = True
         if bad:
-            sys.exit("NOT ready for 100 %: run copy-answer --whole-network (see above)")
-        print("OK: every network PT can load is identical to the sample solution -> 100 % expected")
+            sys.exit("NOT 100 %: fix the items above (copy-answer --whole-network, then set-config / set-host "
+                     "for graded values that differ from the answer network)")
+        if unsure_any:
+            print("OK for every item checkable offline; the UNSURE items above are decided by Packet Tracer")
+            sys.exit(2)
+        print("OK: every graded item has its graded value -> 100 % expected")
         return
 
     if a.cmd == "copy-answer":

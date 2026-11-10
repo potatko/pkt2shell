@@ -24,10 +24,13 @@ Editing Cisco Packet Tracer .pka/.pkt files directly. `CLAUDE.md` imports this f
   the answer network into #0/#1: a device's whole ENGINE (keeps its SAVE_REF_ID and WORKSPACE; other
   `save-ref-id:` references are translated), the LINKS (cabling), or the whole network (`--whole-network`,
   what the skill uses for every activity). Copies are verbatim — startup-config can be graded too.
-- `verify F.pka [--nets 0,1]` — offline check that #0/#1 equal the answer network: every answer device has an
-  identical ENGINE (refs translated, `*MEM_ADDR`/`DEV_ADDR` runtime pointers ignored) and identical LINKS,
-  and `LOAD_INIT_TREE` is not true. Exit 1 with the problems otherwise. On the original file it lists what
-  the activity wants fixed. A file saved by PT fails it (PT re-serializes runtime fields) — just re-copy.
+- `verify F.pka [--nets 0,1]` — offline check of every graded item: reads the current value as PT will see it
+  (IOS: running-config text — hostname, interface ip/ipv6, ip/ipv6 routes, banner, unicast-routing, default
+  gateway; hosts: port IP/SUBNET/IPV6_ADDRESSES/DHCP, GATEWAY, GATEWAYV6, DNS; WRT300N WAN) and compares
+  it with the graded value (see below). Items it cannot read pass only if the device ENGINE is identical
+  to the answer's (refs translated, `*MEM_ADDR`/`DEV_ADDR` ignored); otherwise UNSURE. Also fails on
+  differing LINKS and on `LOAD_INIT_TREE=true`. Exit 0 = 100 %, 1 = WRONG items, 2 = only UNSURE items.
+  Matched PT exactly on "pks25_troubleshooting_10_v2" (149/150, only S1 Host Name wrong).
 - `backup F DEST [--force]` — copy unless DEST exists. `ports` also prints host DNS.
 - `checklist` ends with the root `OVERALL_COMPLETE_FEEDBACK` / `OVERALL_INCOMPLETE_FEEDBACK` texts — what
   Check Results shows when the activity is (in)complete. The user does not want the agent to open Packet
@@ -85,6 +88,12 @@ Editing Cisco Packet Tracer .pka/.pkt files directly. `CLAUDE.md` imports this f
   finished with `copy-answer --whole-network` + `verify`, not with set-config. The answer's startup-config
   may look unrelated (that file: an OSPF template on R1) but is copied as is: COMPARISONS can grade
   "Startup Config".
+- Graded value ≠ answer network: a COMPARISONS leaf has `nodeValue` (the answer network's value) and
+  `variableName`. When `variableName` is non-empty PT grades against it, not the answer network: seen in
+  "pks25_troubleshooting_10_v2" — S1 `Host Name` nodeValue `S1429jfus8fnbk19afhbjkKJR88` (the answer's
+  hostname), variableName `S1`; the copied answer scored that item wrong in PT. Forms: a literal value,
+  `{{RegEx:…}}`, `[[Var]]` or a VARIABLE_MANAGER name (variables are not evaluated offline). PKS2026_8 /
+  Jakubec override all addresses this way (192.168.75.x in variableName vs 192.168.14.x in the answer).
 - Initial setup: root `INITIALSETUP` is a tree like COMPARISONS (checked leaves = values) plus
   `LOAD_INIT_TREE`. When true, PT writes those values into the network **on open** — the planted faults
   (seen in "pks25_troubleshooting_10_v2": PC masks/IPs/DNS, S1 hostname, WPA pass phrase, CE IPv6), so a
