@@ -12,7 +12,8 @@ Commands (FILE may be .pka/.pkt or an already-decrypted .xml):
   instructions FILE [--html]                  activity instructions as Markdown
   checklist FILE [--dev NAME]                 graded items with expected values (answer key) and the
                                               complete / incomplete messages PT shows
-  open      FILE                              open FILE in Packet Tracer (to check the result)
+  verify    FILE [--nets 0,1]                 check offline that networks #0/#1 equal the answer network
+                                              (exit 1 and list differing devices / cabling otherwise)
   copy-answer FILE [DEVICE ...] (-o OUT | --in-place) [--all] [--links] [--whole-network] [--nets 0,1]
                                               copy devices / cabling / whole network from the answer
                                               network (sample solution) into networks #0/#1
@@ -399,18 +400,6 @@ def overall_feedback(buf):
         return html_to_md(unescape(buf[el.is_:el.ie]).decode("utf-8", "replace")).strip() if el is not None else ""
     return get("OVERALL_COMPLETE_FEEDBACK"), get("OVERALL_INCOMPLETE_FEEDBACK")
 
-def open_in_pt(path):
-    """Open FILE in Packet Tracer (macOS: newest /Applications/Cisco Packet Tracer*; else the OS default)."""
-    import glob, subprocess
-    path = os.path.abspath(path)
-    if sys.platform == "darwin":
-        apps = sorted(glob.glob("/Applications/Cisco Packet Tracer*/Cisco Packet Tracer*.app"))
-        cmd = ["open", "-a", apps[-1], path] if apps else ["open", path]
-        subprocess.run(cmd, check=True); return cmd[2] if apps else "default app"
-    if os.name == "nt":
-        os.startfile(path); return "default app"
-    subprocess.run(["xdg-open", path], check=True); return "default app"
-
 def _norm(s):
     return re.sub(r"[\s_\-]+", "", (s or "").lower())
 
@@ -447,24 +436,6 @@ def translate_refs(blob, rmap):
         missing.add(r); return m.group()
     return REF.sub(sub, blob), missing
 
-def _sync_startup(buf, n, ref):
-    """Make an IOS device's startup-config (and flash:config.text) equal to its running-config.
-    The answer network's startup-config can be an unrelated leftover (seen: an OSPF template), which
-    would break the device on `reload`; grading uses the running state."""
-    def eng():
-        nets, _ = networks(buf)
-        return next(e for _x, _t, _m, e in devices(buf, nets[n]) if text(buf, child(buf, e, "SAVE_REF_ID")) == ref)
-    run, st = child(buf, eng(), "RUNNINGCONFIG"), child(buf, eng(), "STARTUPCONFIG")
-    if run is None or st is None:
-        return buf
-    lines = cfg_lines(buf, run)
-    if cfg_lines(buf, st) != lines:
-        buf = splice(buf, st.os, st.oe, build_cfg(buf, st, lines))
-    fc = flash_config(buf, eng())
-    if fc is not None and cfg_lines(buf, fc) != lines:
-        buf = splice(buf, fc.os, fc.oe, build_cfg(buf, fc, lines))
-    return buf
-
 def copy_answer(buf, n, want, do_links):
     """Copy device ENGINEs (and optionally the cabling) of the answer network into network #n.
     Each device keeps its own SAVE_REF_ID and WORKSPACE (position); references between devices are
@@ -498,10 +469,9 @@ def copy_answer(buf, n, want, do_links):
         blob, miss = translate_refs(buf[se.os:se.oe], rmap)
         if miss:
             print(f"  warning: {dst_name}: references to answer-only objects kept as is: {', '.join(sorted(miss))}")
-        new = _sync_startup(splice(buf, de.os, de.oe, blob), n, dref[dst_name])
-        if new == buf:
+        if blob == buf[de.os:de.oe]:
             print(f"  #{n}: {dst_name}: already identical"); continue
-        buf = new
+        buf = splice(buf, de.os, de.oe, blob)
         print(f"  #{n}: {dst_name}: copied from answer {src_name!r}")
     if do_links:
         nets, _ = networks(buf)
@@ -518,6 +488,34 @@ def copy_answer(buf, n, want, do_links):
             buf = splice(buf, dl.os, dl.oe, blob)
             print(f"  #{n}: links copied ({len(links(buf, networks(buf)[0][n]))} cables)")
     return buf
+
+NOISE = re.compile(rb"<([A-Z_]*MEM_ADDR|DEV_ADDR)>[^<]*</\1>")   # runtime pointers, differ per save
+
+def verify(buf, n):
+    """Differences between network #n and the answer network that can affect grading: every answer
+    device must exist in #n with an identical ENGINE (device references translated, runtime pointers
+    ignored) and the cabling must be identical. Returns a list of problems (empty = identical)."""
+    ai = answer_idx(buf)
+    nets, _ = networks(buf)
+    if buf[nets[n].os:nets[n].oe] == buf[nets[ai].os:nets[ai].oe]:
+        return []
+    pairs = match_devices(buf, nets[ai], nets[n])
+    sref, dref = _refs(buf, nets[ai]), _refs(buf, nets[n])
+    rmap = {sref[a]: dref[b] for a, b in pairs.items() if sref.get(a) and dref.get(b)}
+    eng = {x: e for x, _t, _m, e in devices(buf, nets[n])}
+    probs = []
+    for a, _t, _m, se in devices(buf, nets[ai]):
+        if a not in pairs:
+            probs.append(f"{a}: missing (or a different model) in network #{n}"); continue
+        de = eng[pairs[a]]
+        x = NOISE.sub(b"", translate_refs(buf[se.os:se.oe], rmap)[0])
+        if x != NOISE.sub(b"", buf[de.os:de.oe]):
+            probs.append(f"{pairs[a]}: differs from the answer" + (f" ({a!r})" if a != pairs[a] else ""))
+    sl = child(buf, child(buf, nets[ai], "NETWORK"), "LINKS"); dl = child(buf, child(buf, nets[n], "NETWORK"), "LINKS")
+    if (sl is None) != (dl is None) or (sl is not None and
+            NOISE.sub(b"", translate_refs(buf[sl.os:sl.oe], rmap)[0]) != NOISE.sub(b"", buf[dl.os:dl.oe])):
+        probs.append("cabling (LINKS) differs from the answer")
+    return probs
 
 def copy_whole_network(buf, n):
     ai = answer_idx(buf)
@@ -621,7 +619,7 @@ def main():
     p = sp.add_parser("instructions"); p.add_argument("file"); p.add_argument("--html", action="store_true")
     p = sp.add_parser("links"); p.add_argument("file"); _net_args(p)
     p = sp.add_parser("checklist"); p.add_argument("file"); p.add_argument("--dev", help="only this device")
-    p = sp.add_parser("open"); p.add_argument("file")
+    p = sp.add_parser("verify"); p.add_argument("file"); p.add_argument("--nets")
     p = sp.add_parser("copy-answer"); p.add_argument("file"); p.add_argument("devices", nargs="*")
     _out_args(p); p.add_argument("--nets")
     p.add_argument("--all", action="store_true", help="every device that has a counterpart in the answer")
@@ -640,8 +638,6 @@ def main():
             print(f"backup exists, kept: {a.dest}"); return
         os.makedirs(os.path.dirname(os.path.abspath(a.dest)), exist_ok=True)
         _atomic_write(a.dest, open(a.file, "rb").read()); print(f"backup written: {a.dest}"); return
-    if a.cmd == "open":                            # no decryption needed
-        print(f"opened in {open_in_pt(a.file)}: {a.file}"); return
     if a.cmd == "decrypt":
         open(a.out, "wb").write(load(a.file)); return
     if a.cmd == "encrypt":
@@ -723,6 +719,19 @@ def main():
                 print(f"Packet Tracer shows when incomplete: {todo!r}")
         return
 
+
+    if a.cmd == "verify":
+        if answer_idx(buf) is None: sys.exit("no answer network (not an activity file)")
+        bad = False
+        for n in editable_nets(buf, a.nets):
+            probs = verify(buf, n)
+            print(f"network #{n}: " + ("identical to the sample solution" if not probs else f"{len(probs)} difference(s)"))
+            for x in probs: print(f"  - {x}")
+            bad |= bool(probs)
+        if bad:
+            sys.exit("NOT identical to the sample solution: fix with copy-answer (see above)")
+        print("OK: every network PT can load is identical to the sample solution -> 100 % expected")
+        return
 
     if a.cmd == "copy-answer":
         if answer_idx(buf) is None: sys.exit("no answer network (not an activity file)")

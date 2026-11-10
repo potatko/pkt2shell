@@ -15,7 +15,8 @@ Below, `$PKT` stands for this exact command — write it out in full in every sh
 {{PKT}}
 ```
 
-Quote file paths (lab names contain spaces). Each command takes ~2–5 s (pure-Python crypto).
+Quote file paths (lab names contain spaces). Commands take ~2–5 s, on large activities up to ~1 min
+(pure-Python crypto) — use a shell timeout of at least 5 minutes.
 Run one `$PKT` command per shell call (no loops, pipes, `&&` or redirections) and use `$PKT backup`
 instead of `cp` — unattended runs only allow plain `$PKT …` calls.
 
@@ -35,112 +36,64 @@ Packet Tracer first (Packet Tracer would otherwise save its own copy over the re
 ## Rules
 
 - Never modify the original file except in `overwrite` mode, and never without the backup above.
-- Keep work files (instructions, configs) in `{{REPO}}/labs/<short-lab-name>/` (git-ignored).
+- Keep work files (instructions, checklist) in `{{REPO}}/labs/<short-lab-name>/` (git-ignored).
   Never commit `.pka`/`.xml`/instructions or lab solutions to the repo.
-- The answer network (#2, the sample solution) and the graded checklist are **read-only references**:
-  read them with `$PKT checklist`, `--answer` and `copy-answer`, never edit them. Never touch
+- **Activities (`.pka` with an answer network) always end at 100 %:** the networks Packet Tracer loads
+  are made identical to the sample solution (answer network #2) and checked offline with `$PKT verify`.
+  Never open Packet Tracer or other GUI apps to check the result — `verify` is the check.
+- The answer network and the graded checklist are **read-only references**; never edit them, nor
   COMPARISONS, scoring, locking or the activity password (the tool and `encrypt --base` refuse it).
-- Solve the lab from the instructions first; use the answer key to check the result and to fill in
-  whatever you could not do (see "Reach 100 % with the answer key").
-- Claim "complete" only after you have seen Packet Tracer's complete message yourself (step 6, twice);
-  otherwise say the result is not verified in Packet Tracer and ask the user to check.
 
-## Workflow
+## Workflow for an activity (.pka with an answer network — `list` shows `network #2 answer`)
 
 1. **Inspect**
-   - `$PKT list "FILE"` — devices, and which network PT loads (`<- loaded on open`).
-   - `$PKT instructions "FILE"`, save the output to `{{REPO}}/labs/<name>/zadanie.md` (Write tool),
-     then read it fully.
-   - `$PKT checklist "FILE"` — every graded item with its expected value and points (the answer key),
-     save it to `{{REPO}}/labs/<name>/checklist.txt`. This is the target: every line must match.
-   - `$PKT links "FILE"` — topology (which device/port connects where).
-   - `$PKT show "FILE" <dev>` for every IOS device; `$PKT ports "FILE" <host>` for PCs/servers and
-     home wireless routers (the `WAN (Internet setup)` line shows their Internet IP/mask/gateway/DNS).
-     Check **every** value the instructions give for each host — IP, mask, gateway **and DNS** — not
-     only the ones that look wrong; a missing DNS server is a typical planted fault.
-2. **Plan** — addressing (VLSM largest-first when you design it; when the lab leaves the choice open,
-   use router = first usable, switch SVI = second usable, PC = last usable) and per-device tasks.
-   Show the plan to the user briefly as a table.
-3. **Write configs** — for each IOS device save a FULL config to `{{REPO}}/labs/<name>/cfg/<dev>.txt`,
-   starting from `show` output and editing it (set-config replaces, it does not append).
-   - Order matters (lines are replayed): `service password-encryption` and
-     `security passwords min-length N` before any passwords; `hostname` and `ip domain-name`
-     before `crypto key generate rsa general-keys modulus <bits>`.
-   - Interfaces that must be up: omit `shutdown`. Banner delimiter: `^C`.
-   - Local login on VTY = `login local` + `username …`; SSH only = `transport input ssh`.
-4. **Apply**, chaining every edit on the output file:
-   - `new` mode: `$PKT backup "FILE" "OUT" --force` (copy) with OUT = `<original name> - completed.pka`,
-     then edit OUT:
-     ```
-     $PKT set-config "OUT" R1 "{{REPO}}/labs/<name>/cfg/R1.txt" --startup --in-place
-     $PKT set-host "OUT" PC1 --ip … --mask … --gw … [--dns …] [--ipv6 A/64 --ipv6-ll … --ipv6-gw …] --in-place
-     $PKT set-wan "OUT" "Office AP" --ip … --mask … --gw … [--dns …] --in-place   # WRT300N Internet setup
-     ```
-   - `overwrite` mode: `$PKT backup "FILE" "{{REPO}}/labs/<name>/original.pka"` (never replaces an
-     existing backup — it holds the true original), then run the same commands
-     on "FILE" with `--in-place`. The file may already contain edits from an earlier run: still check every
-     device against the instructions.
-   Then re-check with `$PKT show "OUT" <dev>` / `$PKT ports "OUT" <host>`.
-   For anything these commands cannot set, use the answer key / XML fallback below — do not hand it to the user.
-5. **Check against the answer key** — go through `checklist.txt` line by line and compare each expected
-   value with `show` / `ports` / `links` of OUT. Fix every mismatch (next section) before handing over.
-   Then **always finish with** `$PKT copy-answer "OUT" <every device named in checklist.txt> --in-place`
-   (one call, all graded devices). A matching `show` output is not enough: `set-config` only rewrites the
-   config text that PT replays on open, and stale structured state survives the replay — e.g. an old
-   IPv6 address `X/128` stays as "IPv6 Address 1" when the config sets `X/64`, and that item fails.
-   `copy-answer` also sets startup-config = running-config. Mention in the hand-over that the graded
-   devices were synced with the sample solution.
-6. **Verify in Packet Tracer — two checks.** The end of `checklist.txt` holds the two messages PT shows in
-   Check Results (e.g. complete: "Congratulations on completing this activity!", incomplete: "This activity
-   is incomplete, please try again."). PT sometimes reports an edited file as incomplete on the first open and
-   complete on the second, so one look is never enough. With a desktop-control tool (computer use) and
-   Packet Tracer installed:
-   1. If the file is open in Packet Tracer, close it there first and answer **Don't Save / No** (saving
-      would overwrite your result). If you cannot, ask the user to close it.
-   2. `$PKT open "OUT"`, wait until the topology is drawn. Login or other dialogs you cannot handle → ask the user.
-   3. Click *Fast Forward Time* (next to the clock, bottom left) 2–3×, then *Check Results* (bottom of the
-      instructions panel). Read the overall feedback message and *Completion* %. This is **check 1**.
-   4. **Check 2**: close the activity without saving, `$PKT open "OUT"` again, fast-forward, *Check Results* again.
-      Complete = the complete message (100 %) in check 2 — and in check 1, or check 1 was the incomplete
-      message only. Incomplete in both → read the red items under *Assessment Items*, fix them ("Reach 100 %"),
-      re-apply and repeat this step.
-   5. Close the Check Results window and leave Packet Tracer without saving.
-   No desktop-control tool (e.g. Codex), or the window cannot be operated (on another full-screen Space,
-   no response): ask the user to do the same two checks and report the message.
-7. **Hand over** — first line states the result literally, e.g.
-   **"✅ Activity complete — Packet Tracer shows: 'Congratulations on completing this activity!' (checked twice)"**,
-   or **"❌ Activity incomplete — …"** with the failing items, or **"⚠️ Not verified in Packet Tracer"** when
-   step 6 was not possible. Then the output path (and the backup path in `overwrite` mode), what was
-   changed, and for SSH labs `show ip ssh` on the router (if SSH is not enabled, run `crypto key generate
-   rsa` once in the CLI). If the user reports failing items, fix and re-apply.
+   - `$PKT list "FILE"` — devices, and which network PT loads.
+   - `$PKT instructions "FILE"`, save to `{{REPO}}/labs/<name>/zadanie.md` (Write tool), read it.
+   - `$PKT checklist "FILE"`, save to `{{REPO}}/labs/<name>/checklist.txt` — graded items, expected values,
+     points, and the message PT shows when complete.
+   - `$PKT verify "FILE"` — which devices / cabling differ from the sample solution now. For each of them,
+     compare `$PKT show "FILE" <dev>` with `$PKT show "FILE" <dev> --answer` (`ports` for PCs/servers,
+     `links` / `links --answer` for cabling) to explain in the hand-over what was wrong.
+2. **Output file**
+   - `new` mode: `$PKT backup "FILE" "OUT" --force` with OUT = `<original name> - completed.pka`.
+   - `overwrite` mode: `$PKT backup "FILE" "{{REPO}}/labs/<name>/original.pka"` (never replaces an existing
+     backup — it holds the true original); OUT is FILE.
+3. **Copy the sample solution:** `$PKT copy-answer "OUT" --whole-network --in-place`
+   — networks #0 (saved) and #1 (initial) become exact copies of the answer network: configs,
+   startup-configs, structured state (IPv6 lists, VLANs, RSA keys, server services, wireless), cabling,
+   renamed or replaced devices. Nothing outside the networks changes.
+4. **Verify offline:** `$PKT verify "OUT"` must end with
+   `OK: every network PT can load is identical to the sample solution -> 100 % expected`.
+   Anything else → repeat step 3 and verify again; never hand over a file that fails `verify`.
+5. **Hand over** — first line: **"✅ 100 % — the activity is identical to its sample solution (`verify` OK)"**.
+   Then: output path (and backup path in `overwrite` mode); what was wrong and is now fixed, per device
+   (from step 1); the message Packet Tracer will show (`checklist.txt`, e.g. "Congratulations on
+   completing this activity!"). Remind the user: close the file in Packet Tracer **without saving**
+   before the run / reopen it after; if Check Results first says incomplete, press *Fast Forward Time*
+   and check again (live items such as pings need the simulation to converge).
 
-## Reach 100 % with the answer key
+## Workflow for a plain .pkt (no answer network)
 
-When a graded item still does not match, or you have no command for it, or you are not sure how to
-do it, take it from the sample solution instead of guessing or handing it to the user:
+Nothing to copy from — configure it from the instructions/request:
 
-1. Look at the expected state: `$PKT show "FILE" <dev> --answer`, `$PKT ports "FILE" <dev> --answer`,
-   `$PKT links "FILE" --answer`. For IOS devices copy the needed lines (or the whole answer config)
-   into your cfg file and re-apply with `set-config` — this keeps your own work and still matches.
-   Hashed secrets in the answer (`enable secret 5 $1$…`, `username … secret 5 …`) can be copied as is.
-2. Copy whole devices from the answer when the setting is outside running-config (VLAN database, RSA keys,
-   server services DNS/HTTP/DHCP/e-mail, wireless SSID/WPA, device display name, anything you could not find):
+1. Inspect with `list`, `links`, `show <dev>`, `ports <host>`; check **every** value for each host —
+   IP, mask, gateway **and DNS**.
+2. Plan addressing (VLSM largest-first; when the choice is open: router = first usable, switch SVI =
+   second, PC = last) and show it as a short table.
+3. For each IOS device write a FULL config to `{{REPO}}/labs/<name>/cfg/<dev>.txt` starting from `show`
+   (set-config replaces, it does not append). Lines are replayed in order: `service password-encryption`
+   and `security passwords min-length N` before passwords; `hostname` and `ip domain-name` before
+   `crypto key generate rsa general-keys modulus <bits>`. Interfaces that must be up: omit `shutdown`.
+   Banner delimiter `^C`. Local VTY login = `login local` + `username …`; SSH only = `transport input ssh`.
+4. Apply on OUT (backup / output mode as above):
    ```
-   $PKT copy-answer "OUT" "Server0" "Wireless Router" --in-place
+   $PKT set-config "OUT" R1 "{{REPO}}/labs/<name>/cfg/R1.txt" --startup --in-place
+   $PKT set-host "OUT" PC1 --ip … --mask … --gw … [--dns …] [--ipv6 A/64 --ipv6-ll … --ipv6-gw …] --in-place
+   $PKT set-wan "OUT" "Office AP" --ip … --mask … --gw … [--dns …] --in-place   # WRT300N Internet setup
    ```
-   This replaces the device's ENGINE in networks #0/#1 with the answer's (it keeps the device's
-   position and identity; cable references are translated). It renames devices the activity renames.
-3. Missing or wrong cables: `$PKT copy-answer "OUT" --links --in-place`.
-4. Everything at once: `$PKT copy-answer "OUT" --all --links --in-place`. If it reports
-   `SKIPPED … the activity replaces the device` (a device of a different model in the answer) or the
-   activity adds devices, use the last resort `$PKT copy-answer "OUT" --whole-network --in-place`
-   (replaces networks #0/#1 entirely with the answer network).
-5. Re-run steps 5–6 of the workflow (checklist vs. `show`/`ports`, then the two checks in Packet
-   Tracer). In the hand-over list which devices were copied from the answer key.
-
-Note: some graded items are evaluated live in Packet Tracer (connectivity tests, ping results, DHCP
-leases) — copying the configuration makes them pass once the simulation converges; tell the user to
-wait a few seconds or press *Fast Forward Time* before *Check Results*.
+   Re-check with `show` / `ports`. For settings no command covers, use the XML fallback below.
+   Note: `set-config` rewrites config text only; stale structured state (e.g. an old IPv6 address with a
+   different prefix) can survive Packet Tracer's replay — check `ports` and the XML for such leftovers.
 
 ## XML fallback (when no command covers a setting)
 
@@ -150,8 +103,6 @@ decrypted XML directly instead of giving the user a manual GUI step:
 
 1. Apply all tool commands first, then: `$PKT decrypt "OUT" "{{REPO}}/labs/<name>/work.xml"`
    (in `overwrite` mode OUT is FILE).
-   Prefer `copy-answer` (above) for whole devices; use this fallback for a single field, or when the
-   answer key does not cover the setting.
 2. Find the device: Grep for `<NAME translate="true">DEV</NAME>` — it occurs once per network; the
    occurrences are network #0, #1 and #2 (answer) in this order. The third one shows the expected value
    and format — read it, but edit **only the first two**
@@ -172,9 +123,9 @@ decrypted XML directly instead of giving the user a manual GUI step:
 
 - Verified: IOS running-config replay on open; PC/server addressing via set-host; home wireless router
   (WRT300N) Internet/WAN setup via set-wan — do it with the tool, do not hand it to the user as a GUI step.
-- Unverified: RSA keys and VLAN databases (exec-time / `ENGINE/VLANS` state), server services
-  (DNS/HTTP/DHCP records), wireless SSID/security. When a lab needs these, copy the device with
-  `copy-answer` (or use the XML fallback); for RSA keys also give the user the CLI command
-  (`crypto key generate rsa`) in case the replay misses it.
-- `copy-answer` is verified to write a valid file that keeps the answer network and activity data
-  byte-identical; whether Packet Tracer scores every copied setting is confirmed per activity by the user.
+- Unverified for plain .pkt files: RSA keys and VLAN databases (exec-time / `ENGINE/VLANS` state), server
+  services, wireless SSID/security — use the XML fallback; for RSA keys also give the user the CLI command
+  (`crypto key generate rsa`). For activities these come with the whole-network copy.
+- `copy-answer --whole-network` + `verify` guarantee that the loaded networks are byte-identical to the
+  answer network (the reference Packet Tracer grades against), with the answer network and activity data
+  untouched.

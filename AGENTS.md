@@ -22,15 +22,17 @@ Editing Cisco Packet Tracer .pka/.pkt files directly. `CLAUDE.md` imports this f
   with expected value (`nodeValue`), points and component. This is exactly what Check Results scores.
 - `copy-answer F.pka [DEV ...] (-o OUT | --in-place) [--all] [--links] [--whole-network] [--nets 0,1]` — copy from
   the answer network into #0/#1: a device's whole ENGINE (keeps its SAVE_REF_ID and WORKSPACE; other
-  `save-ref-id:` references are translated; startup-config is set to the copied running-config), the LINKS
-  (cabling), or the whole network (last resort).
+  `save-ref-id:` references are translated), the LINKS (cabling), or the whole network (`--whole-network`,
+  what the skill uses for every activity). Copies are verbatim — startup-config can be graded too.
+- `verify F.pka [--nets 0,1]` — offline check that #0/#1 equal the answer network: every answer device has an
+  identical ENGINE (refs translated, `*MEM_ADDR`/`DEV_ADDR` runtime pointers ignored) and identical LINKS.
+  Exit 1 with the differing devices otherwise. On the original file it lists what the activity wants fixed.
 - `backup F DEST [--force]` — copy unless DEST exists. `ports` also prints host DNS.
-- `open F.pka` — open the file in Packet Tracer (macOS: newest `/Applications/Cisco Packet Tracer*`), used by
-  the skill's final check. `checklist` ends with the root `OVERALL_COMPLETE_FEEDBACK` /
-  `OVERALL_INCOMPLETE_FEEDBACK` texts — what Check Results shows when the activity is (in)complete.
+- `checklist` ends with the root `OVERALL_COMPLETE_FEEDBACK` / `OVERALL_INCOMPLETE_FEEDBACK` texts — what
+  Check Results shows when the activity is (in)complete. The user does not want the agent to open Packet
+  Tracer (GUI) to check; `verify` is the check.
 - Observed by the user: PT may report an edited activity as incomplete on the first open and complete on
-  the second, hence the skill checks twice (close without saving, reopen). Background GUI control fails when
-  PT's window is on another Space while a full-screen app is active.
+  the second (live items converging) — Fast Forward Time and Check Results again.
 - `decrypt F.pka OUT.xml` / `encrypt F.xml OUT.pka [--base ORIG.pka]` — whole-file conversion. With `--base`,
   encrypt refuses unless the XML differs from ORIG only inside networks #0/#1 (answer network and ACTIVITY
   byte-identical) and prints the changed devices. The skill's XML fallback (hand-edit settings no command
@@ -78,8 +80,9 @@ Editing Cisco Packet Tracer .pka/.pkt files directly. `CLAUDE.md` imports this f
 - Stale structured state survives RUNNINGCONFIG replay. Seen in "pks25_troubleshooting_12": R1 Gi0/0/0 had
   structured `IPV6_ADDRESSES` = `2001:DADA:10:1000::1/128`; set-config wrote `ipv6 address …::1/64`, `show`
   looked right, yet the activity stayed incomplete (graded "IPv6 Address 1 > Prefix Length = 64"). Replay
-  overwrites single values (IPv4 address, shutdown) but evidently not list entries. Hence the skill ends with
-  `copy-answer` for every graded device. `copy-answer` sets STARTUPCONFIG (+ flash:config.text) = RUNNINGCONFIG,
-  because the answer's startup-config can be an unrelated leftover (that file: an OSPF template on R1).
+  overwrites single values (IPv4 address, shutdown) but evidently not list entries. Hence activities are
+  finished with `copy-answer --whole-network` + `verify`, not with set-config. The answer's startup-config
+  may look unrelated (that file: an OSPF template on R1) but is copied as is: COMPARISONS can grade
+  "Startup Config".
 - Unverified in PT: that every setting copied by `copy-answer` is scored (file validity and untouched
   answer/activity data are verified with `encrypt --base`).

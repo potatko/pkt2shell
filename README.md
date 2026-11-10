@@ -75,23 +75,20 @@ overridden for a single request by stating it explicitly, for example *"overwrit
 
    > Complete the Packet Tracer activity "C:\Users\student\Downloads\11.5.5 Subnet an IPv4 Network.pka"
 
-3. The agent extracts the instructions and topology, presents an addressing and configuration plan,
-   and writes the result according to the configured [output mode](#output-mode): either to
+3. The agent reads the instructions, lists what differs from the activity's sample solution, and writes
+   the result according to the configured [output mode](#output-mode): either to
    `<original name> - completed.pka` next to the original, or into the original file after creating
-   a backup. In overwrite mode, close the file in Packet Tracer before starting.
-4. If the agent can control the desktop (Claude Code desktop app with computer use), it opens the
-   result in Packet Tracer itself and runs *Check Results* twice (reopening the file in between, as
-   Packet Tracer sometimes reports an edited activity as incomplete on the first open). Its report
-   starts with the outcome, e.g. "Activity complete — Packet Tracer shows: 'Congratulations on
-   completing this activity!'". Otherwise, open the result yourself (*File → Open*) and review the
-   completion percentage and *Check Results*.
-5. If the activity is not complete, paste the failing *Check Results* items into the session.
-   The agent corrects the configuration and updates the result.
+   a backup. In overwrite mode, close the file in Packet Tracer (without saving) before starting.
+4. For activities, the networks Packet Tracer loads are replaced by exact copies of the sample
+   solution and checked offline with `verify`; the report starts with "✅ 100 %". Packet Tracer is
+   not opened. Open the result yourself (*File → Open*); if *Check Results* first says incomplete,
+   press *Fast Forward Time* and check again.
+5. Plain `.pkt` files have no sample solution; the agent configures them from the instructions.
 
-The agent first solves the activity from its instructions, then compares the result with the
-activity's answer key (`checklist`, the graded items with their expected values). Any item it could
-not complete — or has no command for — is taken from the sample solution stored in the activity
-(`--answer`, `copy-answer`).
+Every activity stores its sample solution (the answer network Packet Tracer grades against) and a
+list of graded items (`checklist`). The agent copies the sample solution into the networks Packet
+Tracer loads (`copy-answer --whole-network`) and confirms with `verify` that they are identical, so
+the activity is complete without opening Packet Tracer.
 
 ### Post-completion checks
 
@@ -131,7 +128,7 @@ The agent invokes `tools/pkt.py`. It can also be used directly:
 | `show FILE DEVICE [--net N \| --answer] [--startup]` | IOS running- or startup-configuration as text. `--answer` reads the sample solution. |
 | `ports FILE DEVICE [--net N \| --answer]` | Interfaces with MAC and IP addresses. |
 | `checklist FILE [--dev NAME]` | Graded items of the activity with expected values and points (answer key), plus the messages Packet Tracer shows when the activity is complete or incomplete. |
-| `open FILE` | Opens the file in Packet Tracer (used for the final completion check). |
+| `verify FILE` | Offline check that the networks Packet Tracer loads are identical to the sample solution (exit code 1 and a list of differing devices otherwise). |
 | `copy-answer FILE [DEVICE ...] (-o OUT \| --in-place) [--all] [--links] [--whole-network]` | Copies devices, cabling or the whole network from the sample solution into networks #0/#1. |
 | `set-config FILE DEVICE CFG (-o OUT \| --in-place) [--startup] [--nets 0,1]` | Replaces the IOS configuration with the contents of `CFG`. |
 | `set-host FILE DEVICE (-o OUT \| --in-place) [--ip --mask --gw --dns --ipv6 --ipv6-ll --ipv6-gw --ipv6-dns --port]` | Static addressing for PCs and servers. |
