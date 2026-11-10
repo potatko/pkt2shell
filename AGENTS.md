@@ -25,6 +25,12 @@ Editing Cisco Packet Tracer .pka/.pkt files directly. `CLAUDE.md` imports this f
   `save-ref-id:` references are translated; startup-config is set to the copied running-config), the LINKS
   (cabling), or the whole network (last resort).
 - `backup F DEST [--force]` — copy unless DEST exists. `ports` also prints host DNS.
+- `open F.pka` — open the file in Packet Tracer (macOS: newest `/Applications/Cisco Packet Tracer*`), used by
+  the skill's final check. `checklist` ends with the root `OVERALL_COMPLETE_FEEDBACK` /
+  `OVERALL_INCOMPLETE_FEEDBACK` texts — what Check Results shows when the activity is (in)complete.
+- Observed by the user: PT may report an edited activity as incomplete on the first open and complete on
+  the second, hence the skill checks twice (close without saving, reopen). Background GUI control fails when
+  PT's window is on another Space while a full-screen app is active.
 - `decrypt F.pka OUT.xml` / `encrypt F.xml OUT.pka [--base ORIG.pka]` — whole-file conversion. With `--base`,
   encrypt refuses unless the XML differs from ORIG only inside networks #0/#1 (answer network and ACTIVITY
   byte-identical) and prints the changed devices. The skill's XML fallback (hand-edit settings no command

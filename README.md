@@ -79,8 +79,12 @@ overridden for a single request by stating it explicitly, for example *"overwrit
    and writes the result according to the configured [output mode](#output-mode): either to
    `<original name> - completed.pka` next to the original, or into the original file after creating
    a backup. In overwrite mode, close the file in Packet Tracer before starting.
-4. Open the resulting file in Packet Tracer (*File → Open*) and review the completion percentage and
-   *Check Results*.
+4. If the agent can control the desktop (Claude Code desktop app with computer use), it opens the
+   result in Packet Tracer itself and runs *Check Results* twice (reopening the file in between, as
+   Packet Tracer sometimes reports an edited activity as incomplete on the first open). Its report
+   starts with the outcome, e.g. "Activity complete — Packet Tracer shows: 'Congratulations on
+   completing this activity!'". Otherwise, open the result yourself (*File → Open*) and review the
+   completion percentage and *Check Results*.
 5. If the activity is not complete, paste the failing *Check Results* items into the session.
    The agent corrects the configuration and updates the result.
 
@@ -126,7 +130,8 @@ The agent invokes `tools/pkt.py`. It can also be used directly:
 | `links FILE [--net N \| --answer]` | Cabling between devices (topology). |
 | `show FILE DEVICE [--net N \| --answer] [--startup]` | IOS running- or startup-configuration as text. `--answer` reads the sample solution. |
 | `ports FILE DEVICE [--net N \| --answer]` | Interfaces with MAC and IP addresses. |
-| `checklist FILE [--dev NAME]` | Graded items of the activity with expected values and points (answer key). |
+| `checklist FILE [--dev NAME]` | Graded items of the activity with expected values and points (answer key), plus the messages Packet Tracer shows when the activity is complete or incomplete. |
+| `open FILE` | Opens the file in Packet Tracer (used for the final completion check). |
 | `copy-answer FILE [DEVICE ...] (-o OUT \| --in-place) [--all] [--links] [--whole-network]` | Copies devices, cabling or the whole network from the sample solution into networks #0/#1. |
 | `set-config FILE DEVICE CFG (-o OUT \| --in-place) [--startup] [--nets 0,1]` | Replaces the IOS configuration with the contents of `CFG`. |
 | `set-host FILE DEVICE (-o OUT \| --in-place) [--ip --mask --gw --dns --ipv6 --ipv6-ll --ipv6-gw --ipv6-dns --port]` | Static addressing for PCs and servers. |

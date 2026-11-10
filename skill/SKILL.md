@@ -42,7 +42,8 @@ Packet Tracer first (Packet Tracer would otherwise save its own copy over the re
   COMPARISONS, scoring, locking or the activity password (the tool and `encrypt --base` refuse it).
 - Solve the lab from the instructions first; use the answer key to check the result and to fill in
   whatever you could not do (see "Reach 100 % with the answer key").
-- Don't claim a percentage — only Packet Tracer shows it. Ask the user to report it.
+- Claim "complete" only after you have seen Packet Tracer's complete message yourself (step 6, twice);
+  otherwise say the result is not verified in Packet Tracer and ask the user to check.
 
 ## Workflow
 
@@ -89,10 +90,29 @@ Packet Tracer first (Packet Tracer would otherwise save its own copy over the re
    IPv6 address `X/128` stays as "IPv6 Address 1" when the config sets `X/64`, and that item fails.
    `copy-answer` also sets startup-config = running-config. Mention in the hand-over that the graded
    devices were synced with the sample solution.
-6. **Hand over** — tell the user the output path (and the backup path in `overwrite` mode) and what to check in Packet Tracer
-   (open it with File → Open): the completion percentage and Check Results; for SSH labs
-   `show ip ssh` on the router (if SSH is not enabled, they run `crypto key generate rsa` once in the
-   CLI). Ask them to paste failing Check Results items, then fix and re-apply.
+6. **Verify in Packet Tracer — two checks.** The end of `checklist.txt` holds the two messages PT shows in
+   Check Results (e.g. complete: "Congratulations on completing this activity!", incomplete: "This activity
+   is incomplete, please try again."). PT sometimes reports an edited file as incomplete on the first open and
+   complete on the second, so one look is never enough. With a desktop-control tool (computer use) and
+   Packet Tracer installed:
+   1. If the file is open in Packet Tracer, close it there first and answer **Don't Save / No** (saving
+      would overwrite your result). If you cannot, ask the user to close it.
+   2. `$PKT open "OUT"`, wait until the topology is drawn. Login or other dialogs you cannot handle → ask the user.
+   3. Click *Fast Forward Time* (next to the clock, bottom left) 2–3×, then *Check Results* (bottom of the
+      instructions panel). Read the overall feedback message and *Completion* %. This is **check 1**.
+   4. **Check 2**: close the activity without saving, `$PKT open "OUT"` again, fast-forward, *Check Results* again.
+      Complete = the complete message (100 %) in check 2 — and in check 1, or check 1 was the incomplete
+      message only. Incomplete in both → read the red items under *Assessment Items*, fix them ("Reach 100 %"),
+      re-apply and repeat this step.
+   5. Close the Check Results window and leave Packet Tracer without saving.
+   No desktop-control tool (e.g. Codex), or the window cannot be operated (on another full-screen Space,
+   no response): ask the user to do the same two checks and report the message.
+7. **Hand over** — first line states the result literally, e.g.
+   **"✅ Activity complete — Packet Tracer shows: 'Congratulations on completing this activity!' (checked twice)"**,
+   or **"❌ Activity incomplete — …"** with the failing items, or **"⚠️ Not verified in Packet Tracer"** when
+   step 6 was not possible. Then the output path (and the backup path in `overwrite` mode), what was
+   changed, and for SSH labs `show ip ssh` on the router (if SSH is not enabled, run `crypto key generate
+   rsa` once in the CLI). If the user reports failing items, fix and re-apply.
 
 ## Reach 100 % with the answer key
 
@@ -115,8 +135,8 @@ do it, take it from the sample solution instead of guessing or handing it to the
    `SKIPPED … the activity replaces the device` (a device of a different model in the answer) or the
    activity adds devices, use the last resort `$PKT copy-answer "OUT" --whole-network --in-place`
    (replaces networks #0/#1 entirely with the answer network).
-5. Re-run step 5 of the workflow (checklist vs. `show`/`ports`). In the hand-over list which devices
-   were copied from the answer key.
+5. Re-run steps 5–6 of the workflow (checklist vs. `show`/`ports`, then the two checks in Packet
+   Tracer). In the hand-over list which devices were copied from the answer key.
 
 Note: some graded items are evaluated live in Packet Tracer (connectivity tests, ping results, DHCP
 leases) — copying the configuration makes them pass once the simulation converges; tell the user to

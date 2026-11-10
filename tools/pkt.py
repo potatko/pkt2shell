@@ -10,7 +10,9 @@ Commands (FILE may be .pka/.pkt or an already-decrypted .xml):
   ports     FILE DEVICE [--net N | --answer]  list ports with MAC / IP
   links     FILE [--net N | --answer]         list cables (topology)
   instructions FILE [--html]                  activity instructions as Markdown
-  checklist FILE [--dev NAME]                 graded items with expected values (answer key)
+  checklist FILE [--dev NAME]                 graded items with expected values (answer key) and the
+                                              complete / incomplete messages PT shows
+  open      FILE                              open FILE in Packet Tracer (to check the result)
   copy-answer FILE [DEVICE ...] (-o OUT | --in-place) [--all] [--links] [--whole-network] [--nets 0,1]
                                               copy devices / cabling / whole network from the answer
                                               network (sample solution) into networks #0/#1
@@ -389,6 +391,26 @@ def checklist(buf):
         walk(cmp_, [])
     return out
 
+def overall_feedback(buf):
+    """(complete, incomplete) messages Packet Tracer shows in Check Results > Overall Feedback."""
+    r = root_el(buf)
+    def get(tag):
+        el = child(buf, r, tag)
+        return html_to_md(unescape(buf[el.is_:el.ie]).decode("utf-8", "replace")).strip() if el is not None else ""
+    return get("OVERALL_COMPLETE_FEEDBACK"), get("OVERALL_INCOMPLETE_FEEDBACK")
+
+def open_in_pt(path):
+    """Open FILE in Packet Tracer (macOS: newest /Applications/Cisco Packet Tracer*; else the OS default)."""
+    import glob, subprocess
+    path = os.path.abspath(path)
+    if sys.platform == "darwin":
+        apps = sorted(glob.glob("/Applications/Cisco Packet Tracer*/Cisco Packet Tracer*.app"))
+        cmd = ["open", "-a", apps[-1], path] if apps else ["open", path]
+        subprocess.run(cmd, check=True); return cmd[2] if apps else "default app"
+    if os.name == "nt":
+        os.startfile(path); return "default app"
+    subprocess.run(["xdg-open", path], check=True); return "default app"
+
 def _norm(s):
     return re.sub(r"[\s_\-]+", "", (s or "").lower())
 
@@ -599,6 +621,7 @@ def main():
     p = sp.add_parser("instructions"); p.add_argument("file"); p.add_argument("--html", action="store_true")
     p = sp.add_parser("links"); p.add_argument("file"); _net_args(p)
     p = sp.add_parser("checklist"); p.add_argument("file"); p.add_argument("--dev", help="only this device")
+    p = sp.add_parser("open"); p.add_argument("file")
     p = sp.add_parser("copy-answer"); p.add_argument("file"); p.add_argument("devices", nargs="*")
     _out_args(p); p.add_argument("--nets")
     p.add_argument("--all", action="store_true", help="every device that has a counterpart in the answer")
@@ -617,6 +640,8 @@ def main():
             print(f"backup exists, kept: {a.dest}"); return
         os.makedirs(os.path.dirname(os.path.abspath(a.dest)), exist_ok=True)
         _atomic_write(a.dest, open(a.file, "rb").read()); print(f"backup written: {a.dest}"); return
+    if a.cmd == "open":                            # no decryption needed
+        print(f"opened in {open_in_pt(a.file)}: {a.file}"); return
     if a.cmd == "decrypt":
         open(a.out, "wb").write(load(a.file)); return
     if a.cmd == "encrypt":
@@ -690,8 +715,14 @@ def main():
             print(f"{g}  ({len(rows)} items, {pts} pts)")
             for path, val, p, comp in rows:
                 print(f"  {' > '.join(path) or '(self)'} = {val!r}   [{p} pt, {comp}]")
-        if not a.dev: print(f"total: {len(items)} items, {total} pts")
+        if not a.dev:
+            print(f"total: {len(items)} items, {total} pts")
+            done, todo = overall_feedback(buf)
+            if done or todo:
+                print(f"Packet Tracer shows when complete:   {done!r}")
+                print(f"Packet Tracer shows when incomplete: {todo!r}")
         return
+
 
     if a.cmd == "copy-answer":
         if answer_idx(buf) is None: sys.exit("no answer network (not an activity file)")
