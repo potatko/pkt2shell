@@ -22,7 +22,8 @@ Editing Cisco Packet Tracer .pka/.pkt files directly. `CLAUDE.md` imports this f
   with expected value (`nodeValue`), points and component. This is exactly what Check Results scores.
 - `copy-answer F.pka [DEV ...] (-o OUT | --in-place) [--all] [--links] [--whole-network] [--nets 0,1]` — copy from
   the answer network into #0/#1: a device's whole ENGINE (keeps its SAVE_REF_ID and WORKSPACE; other
-  `save-ref-id:` references are translated), the LINKS (cabling), or the whole network (last resort).
+  `save-ref-id:` references are translated; startup-config is set to the copied running-config), the LINKS
+  (cabling), or the whole network (last resort).
 - `backup F DEST [--force]` — copy unless DEST exists. `ports` also prints host DNS.
 - `decrypt F.pka OUT.xml` / `encrypt F.xml OUT.pka [--base ORIG.pka]` — whole-file conversion. With `--base`,
   encrypt refuses unless the XML differs from ORIG only inside networks #0/#1 (answer network and ACTIVITY
@@ -68,5 +69,11 @@ Editing Cisco Packet Tracer .pka/.pkt files directly. `CLAUDE.md` imports this f
 - Each network has its own `SAVE_REF_ID`s, MACs and coordinates; `LINK/CABLE/FROM|TO` and e.g. `DCEDEV`
   reference devices by `save-ref-id:N`. The answer network can contain cables the initial one lacks and
   a different device model (activity replaces a device) — `copy-answer` skips those unless `--whole-network`.
+- Stale structured state survives RUNNINGCONFIG replay. Seen in "pks25_troubleshooting_12": R1 Gi0/0/0 had
+  structured `IPV6_ADDRESSES` = `2001:DADA:10:1000::1/128`; set-config wrote `ipv6 address …::1/64`, `show`
+  looked right, yet the activity stayed incomplete (graded "IPv6 Address 1 > Prefix Length = 64"). Replay
+  overwrites single values (IPv4 address, shutdown) but evidently not list entries. Hence the skill ends with
+  `copy-answer` for every graded device. `copy-answer` sets STARTUPCONFIG (+ flash:config.text) = RUNNINGCONFIG,
+  because the answer's startup-config can be an unrelated leftover (that file: an OSPF template on R1).
 - Unverified in PT: that every setting copied by `copy-answer` is scored (file validity and untouched
   answer/activity data are verified with `encrypt --base`).

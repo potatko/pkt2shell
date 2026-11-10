@@ -83,6 +83,12 @@ Packet Tracer first (Packet Tracer would otherwise save its own copy over the re
    For anything these commands cannot set, use the answer key / XML fallback below — do not hand it to the user.
 5. **Check against the answer key** — go through `checklist.txt` line by line and compare each expected
    value with `show` / `ports` / `links` of OUT. Fix every mismatch (next section) before handing over.
+   Then **always finish with** `$PKT copy-answer "OUT" <every device named in checklist.txt> --in-place`
+   (one call, all graded devices). A matching `show` output is not enough: `set-config` only rewrites the
+   config text that PT replays on open, and stale structured state survives the replay — e.g. an old
+   IPv6 address `X/128` stays as "IPv6 Address 1" when the config sets `X/64`, and that item fails.
+   `copy-answer` also sets startup-config = running-config. Mention in the hand-over that the graded
+   devices were synced with the sample solution.
 6. **Hand over** — tell the user the output path (and the backup path in `overwrite` mode) and what to check in Packet Tracer
    (open it with File → Open): the completion percentage and Check Results; for SSH labs
    `show ip ssh` on the router (if SSH is not enabled, they run `crypto key generate rsa` once in the

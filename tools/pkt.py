@@ -425,6 +425,24 @@ def translate_refs(blob, rmap):
         missing.add(r); return m.group()
     return REF.sub(sub, blob), missing
 
+def _sync_startup(buf, n, ref):
+    """Make an IOS device's startup-config (and flash:config.text) equal to its running-config.
+    The answer network's startup-config can be an unrelated leftover (seen: an OSPF template), which
+    would break the device on `reload`; grading uses the running state."""
+    def eng():
+        nets, _ = networks(buf)
+        return next(e for _x, _t, _m, e in devices(buf, nets[n]) if text(buf, child(buf, e, "SAVE_REF_ID")) == ref)
+    run, st = child(buf, eng(), "RUNNINGCONFIG"), child(buf, eng(), "STARTUPCONFIG")
+    if run is None or st is None:
+        return buf
+    lines = cfg_lines(buf, run)
+    if cfg_lines(buf, st) != lines:
+        buf = splice(buf, st.os, st.oe, build_cfg(buf, st, lines))
+    fc = flash_config(buf, eng())
+    if fc is not None and cfg_lines(buf, fc) != lines:
+        buf = splice(buf, fc.os, fc.oe, build_cfg(buf, fc, lines))
+    return buf
+
 def copy_answer(buf, n, want, do_links):
     """Copy device ENGINEs (and optionally the cabling) of the answer network into network #n.
     Each device keeps its own SAVE_REF_ID and WORKSPACE (position); references between devices are
@@ -458,9 +476,10 @@ def copy_answer(buf, n, want, do_links):
         blob, miss = translate_refs(buf[se.os:se.oe], rmap)
         if miss:
             print(f"  warning: {dst_name}: references to answer-only objects kept as is: {', '.join(sorted(miss))}")
-        if blob == buf[de.os:de.oe]:
+        new = _sync_startup(splice(buf, de.os, de.oe, blob), n, dref[dst_name])
+        if new == buf:
             print(f"  #{n}: {dst_name}: already identical"); continue
-        buf = splice(buf, de.os, de.oe, blob)
+        buf = new
         print(f"  #{n}: {dst_name}: copied from answer {src_name!r}")
     if do_links:
         nets, _ = networks(buf)
