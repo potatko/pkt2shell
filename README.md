@@ -84,6 +84,9 @@ overridden for a single request by stating it explicitly, for example *"overwrit
    not opened. Open the result yourself (*File → Open*); if *Check Results* first says incomplete,
    press *Fast Forward Time* and check again.
 5. Plain `.pkt` files have no sample solution; the agent configures them from the instructions.
+6. To learn from the result, open *View Command Log* in Packet Tracer: it lists, per device, the
+   commands that turn the original activity into the completed one (`cmdlog`). The same commands are
+   saved as `labs/<activity>/prikazy.txt` in the repository.
 
 Every activity stores its sample solution (the answer network Packet Tracer grades against) and a
 list of graded items (`checklist`). The agent copies the sample solution into the networks Packet
@@ -133,6 +136,7 @@ The agent invokes `tools/pkt.py`. It can also be used directly:
 | `set-config FILE DEVICE CFG (-o OUT \| --in-place) [--startup] [--nets 0,1]` | Replaces the IOS configuration with the contents of `CFG`. |
 | `set-host FILE DEVICE (-o OUT \| --in-place) [--ip --mask --gw --dns --ipv6 --ipv6-ll --ipv6-gw --ipv6-dns --port]` | Static addressing for PCs and servers. |
 | `set-wan FILE DEVICE (-o OUT \| --in-place) [--ip --mask --gw --dns]` | Internet (WAN) setup of a home wireless router (Linksys WRT300N). |
+| `cmdlog FILE --from ORIG (-o OUT \| --in-place \| --dry-run) [--txt CMDS.txt]` | Writes the CLI commands that turn `ORIG` (the unsolved file) into `FILE` into Packet Tracer's command log (*View Command Log*), for learning: `enable`, `configure terminal`, the configuration changes, `end`, `copy running-config startup-config`; `ipconfig` / `ipv6config` on PCs. Settings without a CLI (PC DNS, wireless, WAN) are listed as GUI notes. Passwords are shown in plain text (type 7 decoded, type 5 matched against the activity instructions). Devices and grading are not changed. |
 | `decrypt FILE.pka OUT.xml` / `encrypt FILE.xml OUT.pka [--base ORIG.pka]` | Whole-file conversion. With `--base`, only changes inside networks #0/#1 are accepted (used by the agent when it edits settings that no command covers directly in the XML). |
 
 Example:

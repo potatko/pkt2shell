@@ -26,6 +26,10 @@ Commands (FILE may be .pka/.pkt or an already-decrypted .xml):
                                               static addressing for PCs / servers
   set-wan   FILE DEVICE (-o OUT | --in-place) [--ip A --mask M --gw G --dns D] [--nets 0,1]
                                               Internet (WAN) setup of a home wireless router (WRT300N)
+  cmdlog    FILE --from ORIG (-o OUT | --in-place) [--txt CMDS.txt] [--dry-run] [--nets 0,1]
+                                              write the CLI commands that turn ORIG into FILE into PT's
+                                              Command Log (View Command Log), for learning; GUI-only
+                                              settings are listed as notes
   backup    FILE DEST [--force]               copy FILE to DEST unless DEST already exists
   decrypt   FILE.pka OUT.xml
   encrypt   FILE.xml OUT.pka [--base ORIG.pka]   (--base: allow changes only in networks #0/#1)
@@ -678,6 +682,383 @@ def copy_whole_network(buf, n):
     nets, _ = networks(buf)
     return splice(buf, nets[n].os, nets[n].oe, buf[nets[ai].os:nets[ai].oe])
 
+# ---------------------------------------------------------------- command log (for learning)
+#
+# Packet Tracer's "View Command Log" window lists the commands typed on every device. It is stored in the
+# network PT loads as <COMMAND_LOGS><LOG_ENTRY>hex</LOG_ENTRY>…</COMMAND_LOGS> (last child of PACKETTRACER5),
+# each entry = hex(UTF-8 "time\0device\0prompt\0typed\0expanded"), time like "Thu Nov 5 08:57:57 2026"
+# (seen in PT 9.0.1 saves; PC entries have an empty expanded part). cmdlog writes the commands a student
+# would type to get from the original file to the finished one, so the result can be studied in PT.
+
+T7 = "dsfd;kfoA,.iyewrkldJKDHSUBsgvca69834ncxv9873254k;fg87"
+
+def type7_decode(h):
+    try:
+        s = int(h[:2])
+        return "".join(chr(int(h[i:i + 2], 16) ^ ord(T7[(s + i // 2 - 1) % len(T7)])) for i in range(2, len(h), 2))
+    except ValueError:
+        return None
+
+def md5crypt(pw, salt):
+    import hashlib
+    pw, salt, magic = pw.encode(), salt.encode(), b"$1$"
+    fin = hashlib.md5(pw + salt + pw).digest()
+    ctx = pw + magic + salt
+    for pl in range(len(pw), 0, -16):
+        ctx += fin[:min(16, pl)]
+    i = len(pw)
+    while i:
+        ctx += b"\0" if i & 1 else pw[:1]; i >>= 1
+    fin = hashlib.md5(ctx).digest()
+    for i in range(1000):
+        c = (pw if i & 1 else fin) + (salt if i % 3 else b"") + (pw if i % 7 else b"") + (fin if i & 1 else pw)
+        fin = hashlib.md5(c).digest()
+    itoa = "./0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+    def to64(v, n):
+        out = ""
+        for _ in range(n): out += itoa[v & 0x3f]; v >>= 6
+        return out
+    out = "".join(to64((fin[a] << 16) | (fin[b] << 8) | fin[c], 4)
+                  for a, b, c in ((0, 6, 12), (1, 7, 13), (2, 8, 14), (3, 9, 15), (4, 10, 5)))
+    return "$1$" + salt.decode() + "$" + out + to64(fin[11], 2)
+
+COMMON_PW = ["cisco", "class", "cisco123", "class123", "cisco12345", "class12345", "password", "secret",
+             "admin", "letmein", "Cisco123", "sanfran", "ciscoenpa55", "ciscoconpa55", "ciscovtypa55"]
+
+def password_words(buf):
+    """Candidate plaintext passwords: every word of the activity instructions (+ common lab passwords)."""
+    words = set(COMMON_PW)
+    for h in instructions_html(buf):
+        for w in html_to_md(h).split():
+            for x in (w, w.strip(".,;:()[]{}\"'`*!?"), w.strip(".,;:()[]{}\"'`*")):
+                if 0 < len(x) <= 64: words.add(x)
+    return sorted(words)
+
+class Secrets:
+    """Turns stored secrets back into what was typed: type 7 is decoded, type 5 (MD5-crypt) is matched
+    against the instruction words. Unmatched hashes stay as `secret 5 <hash>` (valid IOS input)."""
+    def __init__(self, words):
+        self.words, self.cache, self.unknown = words, {}, set()
+    def secret5(self, h):
+        if h not in self.cache:
+            m = re.match(r"\$1\$([^$]{0,8})\$", h)
+            self.cache[h] = next((w for w in self.words if m and md5crypt(w, m.group(1)) == h), None)
+            if self.cache[h] is None: self.unknown.add(h)
+        return self.cache[h]
+    def plain(self, line):
+        def t7(m):
+            p = type7_decode(m.group(2))
+            return f"{m.group(1)} {p}" if p is not None else m.group(0)
+        line = re.sub(r"\b(password) 7 ([0-9A-Fa-f]{4,})\b", t7, line)
+        def t5(m):
+            p = self.secret5(m.group(2))
+            return f"{m.group(1)} {p}" if p is not None else m.group(0)
+        return re.sub(r"\b(secret) 5 (\$1\$\S+)", t5, line)
+
+CFG_NOISE = re.compile(r"^(!|end|version |Building configuration|Current configuration|no service timestamps |"
+                       r"service timestamps |license udi |ip cef$|no ipv6 cef$|spanning-tree extend system-id$|"
+                       r"ip classless$|ip flow-export version )")
+BLOCK_START = re.compile(r"^(interface |line |router |ipv6 router |ip dhcp pool |ipv6 dhcp pool |ip access-list |"
+                         r"ipv6 access-list |vlan \d|class-map |policy-map |key chain |crypto isakmp policy |crypto map )")
+
+def norm_cfg(lines, secrets):
+    """Config text as typed: no comments/defaults/trailing spaces, passwords in plain text, banner `#…#`."""
+    out = []
+    for l in lines:
+        l = l.rstrip()
+        if not l.strip() or CFG_NOISE.match(l.strip()) and not l.startswith(" "): continue
+        m = re.match(r"^(banner \w+) (\^C|.)(.*)\2$", l)
+        if m:
+            d = "#" if "#" not in m.group(3) else "$"
+            l = f"{m.group(1)} {d}{m.group(3)}{d}"
+        out.append(secrets.plain(l))
+    return out
+
+def cfg_blocks(lines):
+    """[(header, children or None)] — None = a single global line."""
+    out = []
+    for l in lines:
+        if l.startswith(" ") and out and out[-1][1] is not None:
+            out[-1][1].append(l.strip())
+        elif l.startswith(" ") and out:
+            out[-1] = (out[-1][0], [l.strip()])
+        else:
+            out.append((l, [] if BLOCK_START.match(l) else None))
+    return out
+
+SINGLE_KEYS = ("hostname", "enable secret", "enable password", "ip default-gateway", "banner motd", "banner login",
+               "banner exec", "ip domain-name", "ip domain name", "security passwords min-length", "login block-for",
+               "ip ssh version", "ip ssh time-out", "ip ssh authentication-retries", "clock timezone",
+               "spanning-tree mode", "vtp mode", "vtp domain", "description", "switchport access vlan",
+               "switchport mode", "switchport trunk native vlan", "switchport trunk allowed vlan", "encapsulation",
+               "exec-timeout", "transport input", "password", "login", "speed", "duplex", "bandwidth", "clock rate",
+               "router-id", "default-router", "dns-server", "ip ospf cost", "ip ospf priority", "logging synchronous",
+               "privilege level", "ip nat inside", "ip nat outside")
+
+def line_key(l):
+    if l.startswith("username "): return " ".join(l.split()[:2])
+    if l.startswith("ip address ") and not l.endswith(" secondary"): return "ip address"
+    if l.startswith("ipv6 address ") and l.endswith(" link-local"): return "ipv6 link-local"
+    for k in sorted(SINGLE_KEYS, key=len, reverse=True):
+        if l == k or l.startswith(k + " "): return k
+    return l
+
+def diff_lines(old, new):
+    """Commands that turn line list `old` into `new` (one config level)."""
+    added = [l for l in new if l not in old]
+    keys = {line_key(a) for a in added}
+    cmds = []
+    for r in old:
+        if r in new: continue
+        if r.startswith("no "):
+            if any(a == r[3:] or a.startswith(r[3:] + " ") for a in added): continue   # `no ip address` -> ip address
+            cmds.append(r[3:]); continue
+        single = line_key(r) != r or r in SINGLE_KEYS
+        if "no " + r in added or single and (line_key(r) in keys or "no " + line_key(r) in added):
+            continue                             # replaced by a new value (or by `no ip address`)
+        cmds.append("no " + r)
+    return cmds + added
+
+def submode(header):
+    h = header.lower()
+    if h.startswith("interface range"): return "config-if-range"
+    if h.startswith("interface"): return "config-subif" if "." in h.split()[-1] else "config-if"
+    if h.startswith("line"): return "config-line"
+    if h.startswith("router"): return "config-router"
+    if h.startswith("ipv6 router"): return "config-rtr"
+    if h.startswith(("ip dhcp pool", "ipv6 dhcp pool")): return "dhcp-config"
+    if h.startswith("ip access-list standard"): return "config-std-nacl"
+    if h.startswith("ip access-list extended"): return "config-ext-nacl"
+    if h.startswith("ipv6 access-list"): return "config-ipv6-acl"
+    if h.startswith("vlan"): return "config-vlan"
+    if h.startswith("class-map"): return "config-cmap"
+    if h.startswith("policy-map"): return "config-pmap"
+    if h.startswith("key chain"): return "config-keychain"
+    if h.startswith("crypto isakmp"): return "config-isakmp"
+    if h.startswith("crypto map"): return "config-crypto-map"
+    return "config-" + h.split()[0]
+
+def ios_state(buf, e, typ):
+    g = lambda p, t: (text(buf, child(buf, p, t)) or "") if p is not None else ""
+    sec = child(buf, e, "SECURITY")
+    vl = child(buf, e, "VLANS")
+    vlans = {}
+    for v in children(buf, vl) if vl is not None else []:
+        m = re.search(rb'name="([^"]*)" number="(\d+)"', v.attrs)
+        if m and not (m.group(2) == b"1" or 1002 <= int(m.group(2)) <= 1005):
+            vlans[int(m.group(2))] = unescape(m.group(1)).decode("utf-8", "replace")
+    st = child(buf, e, "STARTUPCONFIG")
+    return {"kind": "ios", "type": typ, "run": cfg_lines(buf, child(buf, e, "RUNNINGCONFIG")),
+            "start": cfg_lines(buf, st) if st is not None else [],
+            "rsa": (g(sec, "MODULUS_BITS") or "1024") if g(sec, "RSA_KEY") else "", "vlans": vlans}
+
+def host_state(buf, e):
+    g = lambda p, t: (text(buf, child(buf, p, t)) or "") if p is not None else ""
+    ps = [p for p in descendants(buf, e, "PORT", stop=("PORT",)) if child(buf, p, "IP") is not None]
+    p = next((x for x in ps if g(x, "IP") or g(x, "PORT_DHCP_ENABLE") == "true"), ps[0] if ps else None)
+    v6 = child(buf, p, "IPV6_ADDRESSES") if p is not None else None
+    dc = child(buf, e, "DNS_CLIENT")
+    return {"kind": "host", "port": ps.index(p) if p is not None else 0, "ip": g(p, "IP"), "mask": g(p, "SUBNET"),
+            "gw": g(e, "GATEWAY"), "dhcp": g(p, "PORT_DHCP_ENABLE") == "true",
+            "v6": [[g(a, "ADDRESS"), g(a, "PREFIX")] for a in children(buf, v6)] if v6 is not None else [],
+            "ll": g(p, "IPV6_LINK_LOCAL"), "gw6": g(e, "GATEWAYV6"), "dns": g(dc, "SERVER_IP"),
+            "dns6": g(dc, "SERVER_IPV6")}
+
+def net_state(buf, n):
+    nets, _ = networks(buf)
+    out = {}
+    for name, typ, _m, e in devices(buf, nets[n]):
+        if child(buf, e, "RUNNINGCONFIG") is not None: out[name] = ios_state(buf, e, typ)
+        elif wan_info(buf, e) is not None: out[name] = {"kind": "wan", **wan_info(buf, e)}
+        elif any(child(buf, p, "IP") is not None for p in descendants(buf, e, "PORT", stop=("PORT",))):
+            out[name] = {"kind": "host", **host_state(buf, e)}
+    return out
+
+def apply_init_tree(buf, state):
+    """Overlay the INITIALSETUP values PT writes on open (planted faults) onto the original state, so the
+    fixes for them are logged too. Returns the items that could not be applied (reported as GUI notes)."""
+    rest = []
+    if not init_tree_active(buf): return rest
+    for path, val, *_ in checklist(buf, "INITIALSETUP"):
+        d, p = state.get(path[0]), path[1:]
+        if d is None: rest.append((path, val)); continue
+        if d["kind"] == "ios" and p == ["Host Name"]:
+            d["run"] = [f"hostname {val}" if l.startswith("hostname ") else l for l in d["run"]]
+        elif d["kind"] == "ios" and len(p) >= 3 and p[0] == "Ports":
+            iface, on, out = p[1].lower(), False, []
+            for l in d["run"]:
+                if l.startswith("interface "): on = l[10:].strip().lower() == iface
+                elif not l.startswith(" "): on = False
+                if on and p[2:] == ["IP Address"] and l.startswith(" ip address ") and "secondary" not in l:
+                    l = f" ip address {val} {l.split()[3]}"
+                elif on and p[2:] == ["Subnet Mask"] and l.startswith(" ip address ") and "secondary" not in l:
+                    l = f" ip address {l.split()[2]} {val}"
+                elif on and p[2].lower() == "ipv6 addresses" and len(p) == 5 and l.startswith(" ipv6 address ") \
+                        and "/" in l and "link-local" not in l and _nth(p[3]) == 0:
+                    a, _, pl = l.split()[2].partition("/")
+                    l = f" ipv6 address {val if p[4] == 'IP Address' else a}/{pl if p[4] == 'IP Address' else val}"
+                out.append(l)
+            d["run"] = out
+        elif d["kind"] == "host":
+            key = {("Default Gateway",): "gw", ("Default Gateway IPv6",): "gw6", ("DNS Server IP",): "dns"}.get(tuple(p))
+            if key is None and len(p) == 3 and p[0] == "Ports":
+                key = {"IP Address": "ip", "Subnet Mask": "mask"}.get(p[2])
+            if key: d[key] = val
+            elif len(p) == 5 and p[0] == "Ports" and p[2].lower() == "ipv6 addresses" and d["v6"]:
+                d["v6"][_nth(p[3]) if _nth(p[3]) < len(d["v6"]) else 0][0 if p[4] == "IP Address" else 1] = val
+            else: rest.append((path, val))
+        else: rest.append((path, val))
+    return rest
+
+def ios_commands(old, new, secrets):
+    """[(prompt, command)] a student types on an IOS device to go from `old` to `new` state."""
+    o_run = norm_cfg(old["run"], secrets) if old else []
+    n_run = norm_cfg(new["run"], secrets)
+    host = next((l.split()[1] for l in o_run if l.startswith("hostname ")),
+                "Switch" if new["type"].lower().startswith("switch") else "Router")
+    ob, nb = cfg_blocks(o_run), cfg_blocks(n_run)
+    oglob = [h for h, c in ob if c is None]
+    oblk = {h: c for h, c in ob if c is not None}
+    body = []                                    # [(mode, cmd)]; mode None = global config
+    nglob = [h for h, c in nb if c is None]
+    gcmds = diff_lines(oglob, nglob)
+    removed = [c for c in gcmds if c not in nglob]
+    vl_old = old["vlans"] if old else {}
+    vcmds = []
+    for num, name in sorted(new["vlans"].items()):
+        if vl_old.get(num) != name:
+            vcmds += [(None, f"vlan {num}")] + ([("config-vlan", f"name {name}")]
+                                                 if name != f"VLAN{num:04d}" else []) + [("config-vlan", "exit")]
+    vcmds += [(None, f"no vlan {num}") for num in sorted(vl_old) if num not in new["vlans"]]
+    rsa = new["rsa"] and not (old and old["rsa"])
+    pfx = lambda l: tuple((l[3:] if l.startswith("no ") else l).split()[:2])
+    for h, ch in nb:
+        if ch is None:
+            if h in gcmds:
+                for r in [r for r in removed if pfx(r) == pfx(h)]:   # e.g. `no ip route` before the new route
+                    body.append((None, r)); removed.remove(r)
+                body.append((None, h))
+            if rsa and (h.startswith("ip domain-name ") or h.startswith("ip domain name ")):
+                body.append((None, f"crypto key generate rsa general-keys modulus {new['rsa']}")); rsa = False
+            continue
+        if vcmds and h.startswith("interface "):
+            body += vcmds; vcmds = []
+        sub = diff_lines(oblk.get(h, []), ch) if h in oblk else ch
+        if h not in oblk or sub:
+            mode = submode(h)
+            body += [(None, h)] + [(mode, c) for c in sub] + [(mode, "exit")]
+    body += vcmds
+    if rsa: body.append((None, f"crypto key generate rsa general-keys modulus {new['rsa']}"))
+    body += [(None, c) for c in removed]
+    body += [(None, "no " + h) for h, _c in ob if _c is not None and h not in dict(nb)
+             and not h.startswith(("interface Ethernet", "interface Fast", "interface Gigabit", "interface Serial",
+                                   "line "))]
+    if not body: return []
+    save = new["start"] and norm_cfg(new["start"], secrets) == n_run
+    out = [(f"{host}>", "enable")]
+    if body:
+        out.append((f"{host}#", "configure terminal"))
+        for mode, c in body:
+            out.append((f"{host}({mode or 'config'})#", c))
+            if mode is None and c.startswith("hostname "): host = c.split()[1]
+        out.append((f"{host}(config)#", "end"))
+    if save: out.append((f"{host}#", "copy running-config startup-config"))
+    return out
+
+def host_commands(old, new):
+    """([(prompt, command)], [GUI notes]) for a PC/server/laptop."""
+    o = old or {"ip": "", "mask": "", "gw": "", "dhcp": False, "v6": [], "ll": "", "gw6": "", "dns": "", "dns6": ""}
+    cmds, notes = [], []
+    if new["dhcp"] and not o["dhcp"]:
+        cmds.append("ipconfig /renew")
+    elif not new["dhcp"] and (new["ip"], new["mask"], new["gw"]) != (o["ip"], o["mask"], o["gw"]) and new["ip"]:
+        gw = new["gw"] if new["gw"] and new["gw"] != "0.0.0.0" else ""
+        cmds.append(f"ipconfig {new['ip']} {new['mask']} {gw}".rstrip())
+    v6n = [a for a in new["v6"] if a[0]]
+    if v6n and (v6n[:1] != [a for a in o["v6"] if a[0]][:1] or new["gw6"].upper() != o["gw6"].upper()
+                or new["dns6"].upper() != o["dns6"].upper()):
+        tail = " ".join(x for x in (new["gw6"], new["dns6"] if new["gw6"] else "") if x)
+        cmds.append(f"ipv6config {v6n[0][0]}/{v6n[0][1]} {tail}".rstrip())
+    if new["dns"] != o["dns"] and not new["dhcp"]:
+        notes.append(f"Desktop > IP Configuration > DNS Server = {new['dns'] or '(empty)'}")
+    if new["ll"] and new["ll"].upper() != o["ll"].upper():
+        notes.append(f"Desktop > IP Configuration > IPv6 Link Local Address = {new['ll']}")
+    return [("C:\\>", c) for c in cmds], notes
+
+def wan_notes(old, new):
+    o = old or {}
+    keys = (("INTERNET_IP_ADDRESS", "IP Address"), ("INTERNET_SUBNET_MASK", "Subnet Mask"),
+            ("DEFAULT_GATEWAY", "Default Gateway"), ("DNS", "DNS 1"))
+    ch = [f"{lbl} = {new[k]}" for k, lbl in keys if new.get(k) != o.get(k)]
+    return [f"GUI > Setup > Internet Setup (Static IP): " + ", ".join(ch)] if ch else []
+
+def build_cmdlog(orig, buf, n):
+    """Per device: (name, [(prompt, command)], [GUI notes], is_ios) from the original file to network #n."""
+    before = net_state(orig, loaded_net(orig))
+    leftover = apply_init_tree(orig, before)
+    after = net_state(buf, n)
+    secrets = Secrets(password_words(buf))
+    onames = {_norm(k): k for k in before}
+    res = []
+    order = sorted(after, key=lambda k: (after[k]["kind"] != "ios", list(after).index(k)))
+    for name in order:
+        new = after[name]
+        old = before.get(name) or before.get(onames.get(_norm(name), ""))
+        if old is not None and old["kind"] != new["kind"]: old = None
+        added = [] if old is not None else ["device not in the original file (added/replaced by the solution)"]
+        if new["kind"] == "ios":
+            c = ios_commands(old, new, secrets)
+            res.append((name, c, added if c else [], True))
+        elif new["kind"] == "host":
+            c, notes = host_commands(old, new); res.append((name, c, added + notes if c or notes else [], False))
+        else:
+            notes = wan_notes(old, new); res.append((name, [], added + notes if notes else [], False))
+    for path, val in leftover:
+        notes = [f"{' > '.join(path[1:])} = {val!r} (set by the activity on open; the solution changes it — GUI)"]
+        for i, r in enumerate(res):
+            if r[0] == path[0]: res[i] = (r[0], r[1], r[2] + notes, r[3]); break
+    res = [r for r in res if r[1] or r[2]]
+    used = {h for _n, cmds, _x, _i in res for _p, c in cmds for h in secrets.unknown if h in c}
+    return res, used
+
+DAYS, MONTHS = "Mon Tue Wed Thu Fri Sat Sun".split(), "Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec".split()
+
+def log_entries(res, start=None):
+    import datetime
+    t = start or datetime.datetime.now().replace(microsecond=0)
+    out = []
+    for name, cmds, _notes, ios in res:
+        for prompt, c in cmds:
+            ts = f"{DAYS[t.weekday()]} {MONTHS[t.month - 1]} {t.day} {t:%H:%M:%S} {t.year}"
+            out.append("\0".join((ts, name, prompt, c, c if ios else "")).encode("utf-8").hex())
+            t += datetime.timedelta(seconds=3)
+        t += datetime.timedelta(seconds=20)
+    return out
+
+def set_command_log(buf, n, entries):
+    nets, _ = networks(buf)
+    net = nets[n]
+    kids = children(buf, net)
+    old = next((c for c in kids if c.tag == "COMMAND_LOGS"), None)
+    ind = indent_of(buf, kids[0].os) if kids else b"  "
+    body = b"".join(b"\n" + ind + b" <LOG_ENTRY>" + h.encode() + b"</LOG_ENTRY>" for h in entries)
+    new = b"<COMMAND_LOGS>" + body + b"\n" + ind + b"</COMMAND_LOGS>" if entries else b"<COMMAND_LOGS/>"
+    if old is not None:
+        return splice(buf, old.os, old.oe, new)
+    last = kids[-1].oe if kids else net.is_
+    return splice(buf, last, last, b"\n" + ind + new)
+
+def cmdlog_text(res, unknown):
+    out = []
+    for name, cmds, notes, _ios in res:
+        out.append(f"=== {name}")
+        out += [f"{p} {c}" for p, c in cmds]
+        out += [f"  (GUI) {x}" for x in notes]
+        out.append("")
+    if unknown:
+        out.append("Secrets not found in the instructions (kept as 'secret 5 <hash>'): " + ", ".join(sorted(unknown)))
+    return "\n".join(out).rstrip() + "\n"
+
 # ---------------------------------------------------------------- activity instructions
 
 def instructions_html(buf):
@@ -782,6 +1163,13 @@ def main():
     p.add_argument("--links", action="store_true", help="also copy the cabling")
     p.add_argument("--whole-network", action="store_true",
                    help="replace networks #0/#1 entirely with the answer network (last resort)")
+    p = sp.add_parser("cmdlog"); p.add_argument("file")
+    p.add_argument("--from", dest="orig", required=True, help="the original (unsolved) .pka/.pkt")
+    g = p.add_mutually_exclusive_group()
+    g.add_argument("-o", "--out"); g.add_argument("--in-place", action="store_true")
+    p.add_argument("--nets", help="networks to write the log to (default: #0, and #1 when PT loads it)")
+    p.add_argument("--txt", help="also write the commands as readable text to this file")
+    p.add_argument("--dry-run", action="store_true", help="only print the commands")
     p = sp.add_parser("decrypt"); p.add_argument("file"); p.add_argument("out")
     p = sp.add_parser("encrypt"); p.add_argument("file"); p.add_argument("out")
     p.add_argument("--base", help="original .pka/.xml; refuse unless only networks #0/#1 differ from it")
@@ -919,6 +1307,28 @@ def main():
             print(f"  initial setup disabled (LOAD_INIT_TREE=false): Packet Tracer would otherwise write {k} "
                   f"planted value(s) over the solution on open")
         save(buf, a.out); print(f"answer copied -> {a.out}"); return
+
+    if a.cmd == "cmdlog":
+        if not (a.out or a.dry_run): sys.exit("cmdlog: give -o OUT, --in-place or --dry-run")
+        orig = load(a.orig)
+        if a.nets:
+            nets_ = editable_nets(buf, a.nets)
+        else:
+            nets_ = [0] + ([1] if loaded_net(buf) == 1 else [])
+        res, unknown = build_cmdlog(orig, buf, loaded_net(buf))
+        txt = cmdlog_text(res, unknown)
+        print(txt, end="")
+        if a.txt:
+            os.makedirs(os.path.dirname(os.path.abspath(a.txt)), exist_ok=True)
+            _atomic_write(a.txt, txt.encode("utf-8")); print(f"commands written -> {a.txt}")
+        if a.dry_run: return
+        entries = log_entries(res)
+        for n in nets_:
+            buf = set_command_log(buf, n, entries)
+        save(buf, a.out)
+        print(f"command log: {len(entries)} commands on {sum(1 for r in res if r[1])} devices "
+              f"(network(s) {', '.join('#' + str(n) for n in nets_)}) -> {a.out}")
+        return
 
     if a.cmd == "set-config":
         lines = open(a.cfg, encoding="utf-8").read().splitlines()

@@ -41,6 +41,14 @@ Editing Cisco Packet Tracer .pka/.pkt files directly. `CLAUDE.md` imports this f
   encrypt refuses unless the XML differs from ORIG only inside networks #0/#1 (answer network and ACTIVITY
   byte-identical) and prints the changed devices. The skill's XML fallback (hand-edit settings no command
   covers) always encrypts with `--base`.
+- `cmdlog F.pka --from ORIG.pka (-o OUT | --in-place | --dry-run) [--txt CMDS.txt] [--nets 0,1]` — writes the
+  commands a student would type to get from ORIG (unsolved) to F into PT's Command Log, for learning.
+  Diff per device: IOS running-config (normalised: defaults dropped, `password 7` decoded, `secret 5`
+  matched by MD5-crypt against the instruction words, banners as `#…#`), VLANs (ENGINE/VLANS), RSA key
+  (SECURITY/RSA_KEY → `crypto key generate rsa general-keys modulus <MODULUS_BITS>`), `copy running-config
+  startup-config` when the final startup equals running; hosts → `ipconfig IP MASK GW`, `ipconfig /renew`,
+  `ipv6config A/P GW6 DNS6`; PC DNS, link-local, wireless, WAN → GUI notes. ORIG's INITIALSETUP values
+  (planted faults) are overlaid first. Default target: network #0 (+ #1 when PT loads #1). Devices untouched.
 - `instructions F.pka [--html]` — activity instructions (ACTIVITY/INSTRUCTIONS/PAGE, CDATA HTML) as Markdown.
 - `set-config F.pka DEV cfg.txt (-o OUT.pka | --in-place) [--nets 0,1] [--startup]` — replace running-config
   (+ startup-config and the switch's `flash:config.text`, FILE_MANAGER, with --startup). Same text goes to every listed network.
@@ -100,5 +108,12 @@ Editing Cisco Packet Tracer .pka/.pkt files directly. `CLAUDE.md` imports this f
   network identical to the answer still scored incomplete. PT saves the file with false after the first open.
   `copy-answer` sets it to false (the one allowed change outside the networks; `encrypt --base` accepts
   only that), `verify` fails while it is true.
+- Command log ("View Command Log", PT 9.0.1): `<COMMAND_LOGS>` is the last child of network #0 (after
+  `CODE_TESTING`; PT never writes it into #1/#2, so `copy-answer --whole-network` drops it). Each
+  `<LOG_ENTRY>` = lowercase hex of UTF-8 `time\0device\0prompt\0typed\0expanded`, time in Qt format
+  `Thu Nov 5 08:57:57 2026`; PC entries (`C:\>`) have an empty expanded part. PT's PC CLI accepts
+  `ipconfig <IP> <mask> [<gw>]` and `ipv6config <addr>/<prefix> [<gw> [<DNS>]]` (strings in the binary).
+  PT's secrets are MD5-crypt with salt `mERr`. Unverified in PT: that a generated log is shown when PT
+  loads #1 (CLEAN_ACTIVITY=true) — cmdlog then writes it into #1 too.
 - Unverified in PT: that every setting copied by `copy-answer` is scored (file validity and untouched
   answer/activity data are verified with `encrypt --base`).

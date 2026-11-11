@@ -77,11 +77,22 @@ Packet Tracer first (Packet Tracer would otherwise save its own copy over the re
    - Repeat until `verify` ends with `OK: every graded item has its graded value -> 100 % expected` (exit 0).
      Exit 2 = all checkable items OK, the `UNSURE` lines (live tests, variables `[[…]]`) are decided by
      Packet Tracer — hand over with those listed. Never hand over a file with `WRONG` lines.
-5. **Hand over** — first line: **"✅ 100 % — every graded item has its graded value (`verify` OK)"**
+5. **Command log (always — the user learns from it):**
+   `$PKT cmdlog "OUT" --from "ORIG" --txt "{{REPO}}/labs/<name>/prikazy.txt" --in-place`
+   with ORIG = the untouched original (`new` mode: FILE; `overwrite` mode: the backup
+   `{{REPO}}/labs/<name>/original.pka`). It writes the CLI commands a student would type to get from the
+   original to the finished file (enable → configure terminal → changes → end → copy running-config
+   startup-config; PCs: `ipconfig` / `ipv6config`) into Packet Tracer's Command Log (*View Command Log*),
+   and lists settings that have no CLI (DNS on a PC, wireless, WAN) as `(GUI)` notes. Passwords appear in
+   plain text (type 7 decoded, type 5 matched against the instruction words). It does not touch any device,
+   so grading is unchanged — run `$PKT verify "OUT"` once more as the final check.
+6. **Hand over** — first line: **"✅ 100 % — every graded item has its graded value (`verify` OK)"**
    (or **"⚠️ 100 % of checkable items — Packet Tracer decides: …"** with the UNSURE items, exit 2).
    Then: output path (and backup path in `overwrite` mode); what was wrong and is now fixed, per device
    (from step 1); the message Packet Tracer will show (`checklist.txt`, e.g. "Congratulations on
-   completing this activity!"). Remind the user: close the file in Packet Tracer **without saving**
+   completing this activity!"); that the commands are in Packet Tracer's *View Command Log* and in
+   `{{REPO}}/labs/<name>/prikazy.txt` (how many commands, on which devices, and the `(GUI)` notes).
+   Remind the user: close the file in Packet Tracer **without saving**
    before the run / reopen it after; if Check Results first says incomplete, press *Fast Forward Time*
    and check again (live items such as pings need the simulation to converge).
 
@@ -105,6 +116,8 @@ Nothing to copy from — configure it from the instructions/request:
    $PKT set-wan "OUT" "Office AP" --ip … --mask … --gw … [--dns …] --in-place   # WRT300N Internet setup
    ```
    Re-check with `show` / `ports`. For settings no command covers, use the XML fallback below.
+5. Finish with the command log as in step 5 of the activity workflow
+   (`$PKT cmdlog "OUT" --from "ORIG" --txt "{{REPO}}/labs/<name>/prikazy.txt" --in-place`).
    Note: `set-config` rewrites config text only; stale structured state (e.g. an old IPv6 address with a
    different prefix) can survive Packet Tracer's replay — check `ports` and the XML for such leftovers.
 
